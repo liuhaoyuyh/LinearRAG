@@ -3,6 +3,11 @@ from src.utils import compute_mdhash_id
 import numpy as np
 import pandas as pd
 import os
+from copy import deepcopy
+from src.utils import compute_mdhash_id
+import numpy as np
+import pandas as pd
+import os
 
 class EmbeddingStore:
     def __init__(self, embedding_model, db_filename, batch_size, namespace):

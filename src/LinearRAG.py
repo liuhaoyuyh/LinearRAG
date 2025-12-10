@@ -41,7 +41,7 @@ class LinearRAG:
 
     def qa(self, questions):
         retrieval_results = self.retrieve(questions)
-        system_prompt = f"""As an advanced reading comprehension assistant, your task is to analyze text passages and corresponding questions meticulously. Your response start after "Thought: ", where you will methodically break down the reasoning process, illustrating how you arrive at conclusions. Conclude with "Answer: " to present a concise, definitive response, devoid of additional elaborations."""
+        system_prompt = f"""As an advanced reading comprehension assistant, your task is to analyze text passages and corresponding questions meticulously. Your response start after "Thought: ", where you will methodically break down the reasoning process, illustrating how you arrive at conclusions. Conclude with "Answer: " to present a concise, definitive response, devoid of additional elaborations.If you encounter tabular content, you must provide a detailed explanation of the table based on its data.Respond to me in Chinese and translate it into English."""
         all_messages = []
         for retrieval_result in retrieval_results:
             question = retrieval_result["question"]

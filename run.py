@@ -18,7 +18,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument("--spacy_model", type=str, default="en_core_web_trf", help="The spacy model to use")
     parser.add_argument("--embedding_model", type=str, default="model/all-mpnet-base-v2", help="The path of embedding model to use")
-    parser.add_argument("--dataset_name", type=str, default="novel", help="The dataset to use")
+    parser.add_argument("--dataset_name", type=str, default="medical", help="The dataset to use")
     parser.add_argument("--llm_model", type=str, default="gpt-4o-mini", help="The LLM model to use")
     parser.add_argument("--max_workers", type=int, default=16, help="The max number of workers to use")
     parser.add_argument("--max_iterations", type=int, default=3, help="The max number of iterations to use")
@@ -39,7 +39,7 @@ def load_dataset(dataset_name):
     return questions, passages
 
 def load_embedding_model(embedding_model):
-    embedding_model = SentenceTransformer(embedding_model,device="cuda")
+    embedding_model = SentenceTransformer(embedding_model,device="cpu")
     return embedding_model
 
 def main():

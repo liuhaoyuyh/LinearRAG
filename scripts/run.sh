@@ -11,10 +11,10 @@ cd /mnt/data/lyzhuang/linear-rag
 # THRESHOLD=0.5
 # TOP_K_SENTENCE=1
 
-# musique
+# musique_1
 # SPACY_MODEL="en_core_web_trf"
 # EMBEDDING_MODEL="model/all-mpnet-base-v2"
-# DATASET="musique"
+# DATASET="musique_1"
 # LLM_MODEL="gpt-4o-mini"
 # MAX_WORKERS=16
 # MAX_ITERATION=5

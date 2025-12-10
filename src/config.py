@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 from src.utils import LLM_Model
+from pydantic import BaseModel
+from typing import List, Optional
 @dataclass
 class LinearRAGConfig:
     dataset_name: str

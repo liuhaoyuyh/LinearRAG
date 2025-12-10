@@ -6,6 +6,9 @@ class SpacyNER:
         self.spacy_model = spacy.load(spacy_model)
 
     def batch_ner(self, hash_id_to_passage, max_workers):
+        # 线程bug，如果线程数多于段落的长度，线程数即为段落的长度
+        if max_workers > len(hash_id_to_passage):
+            max_workers = len(hash_id_to_passage)
         passage_list = list(hash_id_to_passage.values())
         batch_size = len(passage_list) // max_workers
         docs_list = self.spacy_model.pipe(passage_list,batch_size=batch_size)

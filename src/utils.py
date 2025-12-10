@@ -10,7 +10,8 @@ import string
 import logging
 import numpy as np
 import os
-
+from dotenv import load_dotenv
+load_dotenv()
 def compute_mdhash_id(content: str, prefix: str = "") -> str:
     return prefix + md5(content.encode()).hexdigest()
 

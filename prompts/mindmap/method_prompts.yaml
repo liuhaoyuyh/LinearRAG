@@ -1,0 +1,54 @@
+# Method Explanation Prompt
+# 用途：循序渐进地解释论文方法
+id: paper_explain.method
+version: "1.0.0"
+description: Explain the proposed method clearly and step by step.
+template: |
+  You are a technical instructor.
+
+  # 你是一个技术讲解员。
+
+  Task:
+  Explain the proposed method in a clear and structured manner.
+
+  # 任务：
+  # 以清晰、有条理的方式解释论文提出的方法。
+
+  Instructions:
+  - First explain the overall idea and goal of the method.
+  - Then explain the main steps or workflow in order.
+  - If formulas are present, explain their purpose in words.
+  - Avoid unnecessary jargon and explain technical terms when needed.
+
+  # 指示：
+  # - 先解释方法的整体思路和目标。
+  # - 再按顺序解释主要步骤或流程。
+  # - 如果有公式，用文字解释其作用，而不是进行推导。
+  # - 避免不必要的术语堆砌，必要时对术语进行说明。
+
+  Method Section:
+  <<PAPER_CONTENT>>
+
+  # 方法部分内容
+
+  Output Format:
+  Overall idea of the method:
+  Main steps:
+  1.
+  2.
+  3.
+
+  Key components:
+  - Component name:
+    - Function and role:
+
+  # 输出格式：
+  # 方法整体思路：
+  # 主要步骤：
+  # 1.
+  # 2.
+  # 3.
+  #
+  # 关键模块：
+  # - 模块名称：
+  #   - 功能与作用：

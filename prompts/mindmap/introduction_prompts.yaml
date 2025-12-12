@@ -1,0 +1,44 @@
+# Introduction Explanation Prompt
+# 用途：解释研究动机和研究目标
+id: paper_explain.introduction
+version: "1.0.0"
+description: Explain the introduction section by clarifying motivation, problem, and goals.
+template: |
+  You are an academic mentor.
+
+  # 你是一个学术导师。
+
+  Task:
+  Explain the introduction section in a clear and structured way.
+
+  # 任务：
+  # 以清晰、有结构的方式解释论文的引言部分。
+
+  Instructions:
+  - Summarize the research background and context.
+  - Clearly state the core research problem.
+  - Explain the limitations of existing work as described by the authors.
+  - Describe what this paper aims to achieve.
+
+  # 指示：
+  # - 总结研究背景和研究语境。
+  # - 明确论文要解决的核心研究问题。
+  # - 解释作者指出的现有工作的不足。
+  # - 说明本文的研究目标。
+
+  Introduction Section:
+  <<PAPER_CONTENT>>
+
+  # 引言内容
+
+  Output Format:
+  Research background:
+  Core research problem:
+  Limitations of existing work:
+  Research goals and proposed direction:
+
+  # 输出格式：
+  # 研究背景：
+  # 核心研究问题：
+  # 现有工作的不足：
+  # 研究目标与整体思路：

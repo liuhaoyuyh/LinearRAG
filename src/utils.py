@@ -9,7 +9,7 @@ import logging
 import numpy as np
 import os
 from dotenv import load_dotenv
-from src.model_client import ModelRequest, create_model_client_from_env
+from src.model_client import ModelRequest, ModelResponse, create_model_client_from_env
 load_dotenv()
 def compute_mdhash_id(content: str, prefix: str = "") -> str:
     return prefix + md5(content.encode()).hexdigest()
@@ -19,15 +19,46 @@ class LLM_Model:
         self._client = create_model_client_from_env(default_model=llm_model)
         self._max_tokens = 2000
         self._temperature = 0
-    def infer(self, messages):
-        response = self._client.generate(
+
+    def generate(self, messages) -> ModelResponse:
+        return self._client.generate(
             ModelRequest(
                 messages=messages,
                 max_tokens=self._max_tokens,
                 temperature=self._temperature,
             )
         )
-        return response.content
+
+    def infer(self, messages):
+        return self.generate(messages).content
+
+
+def estimate_token_count(text: str) -> int:
+    if not text:
+        return 0
+    s = str(text)
+    cjk = re.findall(r"[\u4e00-\u9fff]", s)
+    cjk_count = len(cjk)
+    ascii_words = re.findall(r"[A-Za-z0-9]+(?:'[A-Za-z]+)?", s)
+    ascii_word_count = len(ascii_words)
+    non_space = len(re.findall(r"\S", s))
+    other = max(0, non_space - cjk_count - sum(len(w) for w in ascii_words))
+    est = cjk_count + ascii_word_count + int(other / 4)
+    return max(1, est) if est > 0 else 0
+
+
+def estimate_message_tokens(messages) -> int:
+    if not messages:
+        return 0
+    total = 0
+    for msg in messages:
+        try:
+            role = str(msg.get("role", ""))
+            content = str(msg.get("content", ""))
+            total += estimate_token_count(role) + estimate_token_count(content)
+        except Exception:
+            continue
+    return total
 
 
 

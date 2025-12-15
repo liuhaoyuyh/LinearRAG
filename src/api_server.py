@@ -8,6 +8,7 @@ import base64
 import mimetypes
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -18,10 +19,11 @@ import httpx
 from src.LinearRAG import LinearRAG
 from src.config import LinearRAGConfig
 from src.evaluate import Evaluator
-from src.utils import LLM_Model, setup_logging
+from src.utils import LLM_Model, estimate_message_tokens, estimate_token_count, setup_logging
 from prompts.loader import PromptLoader
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+logger = logging.getLogger(__name__)
 
 
 class BaseRunConfig(BaseModel):
@@ -874,6 +876,11 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
         rag = LinearRAG(global_config=config)
         _ensure_index_ready(rag)
 
+        token_total_input = 0
+        token_total_output = 0
+        token_total = 0
+        estimated_modules = 0
+
         queries: List[dict] = []
         for m in modules:
             title = m["title"] or ""
@@ -936,13 +943,32 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
                 context_text=combined_input,
                 anchor_title=anchor_title,
             )
-            answer = rag.llm_model.infer(messages)
+            response = rag.llm_model.generate(messages)
+            answer = response.content
+
+            usage = response.usage or {}
+            prompt_tokens = usage.get("prompt_tokens")
+            completion_tokens = usage.get("completion_tokens")
+            total_tokens = usage.get("total_tokens")
+            estimated = False
+            if not isinstance(prompt_tokens, int) or not isinstance(completion_tokens, int):
+                prompt_tokens = estimate_message_tokens(messages)
+                completion_tokens = estimate_token_count(answer)
+                total_tokens = prompt_tokens + completion_tokens
+                estimated = True
+            if not isinstance(total_tokens, int):
+                total_tokens = int(prompt_tokens) + int(completion_tokens)
+
             return {
                 "llm_answer": answer,
                 "module_type": module_type,
                 "anchor_title": anchor_title,
                 "subtree_node_count": len(subtree_nodes),
                 "context_clipped": agg_context_clipped,
+                "token_input": int(prompt_tokens),
+                "token_output": int(completion_tokens),
+                "token_total": int(total_tokens),
+                "token_estimated": estimated,
                 **prompt_meta,
             }
 
@@ -960,6 +986,22 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
                 }
                 try:
                     out = future.result()
+                    token_total_input += int(out.get("token_input") or 0)
+                    token_total_output += int(out.get("token_output") or 0)
+                    token_total += int(out.get("token_total") or 0)
+                    if out.get("token_estimated"):
+                        estimated_modules += 1
+
+                    logger.info(
+                        "mindmap_explain module_id=%s path=%s anchor=%s input_tokens=%s output_tokens=%s total_tokens=%s estimated=%s",
+                        result_item.get("id"),
+                        result_item.get("path"),
+                        out.get("anchor_title"),
+                        out.get("token_input"),
+                        out.get("token_output"),
+                        out.get("token_total"),
+                        out.get("token_estimated"),
+                    )
                     result_item.update(
                         {
                             "prompt_id": out.get("prompt_id"),
@@ -990,6 +1032,15 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
                     if request.include_tree and module.get("_node_ref") is not None:
                         module["_node_ref"]["error"] = str(e)
                 results.append(result_item)
+
+        logger.info(
+            "mindmap_explain_total modules=%s input_tokens=%s output_tokens=%s total_tokens=%s estimated_modules=%s",
+            len(modules),
+            token_total_input,
+            token_total_output,
+            token_total,
+            estimated_modules,
+        )
 
         results.sort(key=lambda x: (int(x["id"]) if x.get("id", "").isdigit() else 10**9, str(x.get("path", ""))))
         status = "partial_success" if had_errors else "success"

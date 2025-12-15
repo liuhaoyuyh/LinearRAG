@@ -126,6 +126,7 @@ class MindmapExplainResultItem(BaseModel):
     path: str
     module_type: Optional[str] = None
     anchor_title: Optional[str] = None
+    subtree_node_count: Optional[int] = None
     prompt_id: Optional[str] = None
     prompt_version: Optional[str] = None
     context: Optional[List[str]] = None
@@ -259,38 +260,22 @@ def _extract_node_from_line(line: str, last_heading_level: int):
     if heading:
         level = len(heading.group(1))
         text = heading.group(2).strip()
-        return level, text, text, True
+        return {"kind": "node", "level": level, "title": text, "content": text, "is_heading": True}
 
     zh_num = re.match(r"^([一二三四五六七八九十百千]+)[、.．]\s*(.*)$", stripped)
     if zh_num:
         text = zh_num.group(2).strip() or zh_num.group(1)
-        return 1, text, text, True
+        return {"kind": "node", "level": 1, "title": text, "content": text, "is_heading": True}
 
     numbered = re.match(r"^(\d+(?:\.\d+)*)(?:[.)、])?\s+(.*)$", stripped)
     if numbered:
         num = numbered.group(1)
         text = numbered.group(2).strip() or num
         level = max(1, len(num.split(".")))
-        return level, text, text, True
+        return {"kind": "node", "level": level, "title": text, "content": text, "is_heading": True}
 
-    indent = len(expanded) - len(expanded.lstrip(" "))
-    bullet = re.match(r"^[-*+]\s+(.*)$", stripped)
-    if bullet:
-        base = last_heading_level if last_heading_level > 0 else 0
-        level = base + 1 + indent // 2
-        text = bullet.group(1).strip()
-        return max(1, level), text, text, False
-
-    numbered_list = re.match(r"^(\d+)\.\s+(.*)$", stripped)
-    if numbered_list:
-        base = last_heading_level if last_heading_level > 0 else 0
-        level = base + 1 + indent // 2
-        text = numbered_list.group(2).strip() or numbered_list.group(1)
-        return max(1, level), text, text, False
-
-    # 普通段落挂到最近标题下
-    paragraph_level = (last_heading_level if last_heading_level > 0 else 0) + 1
-    return paragraph_level, stripped, stripped, False
+    # 非标题内容（段落、列表等）不作为模块节点，直接并入最近标题的 content
+    return {"kind": "text", "text": stripped}
 
 
 def _parse_markdown_to_tree(md_text: str, root_title: str) -> dict:
@@ -310,10 +295,26 @@ def _parse_markdown_to_tree(md_text: str, root_title: str) -> dict:
         parsed = _extract_node_from_line(line, last_heading_level)
         if not parsed:
             continue
-        level, title, content, is_heading = parsed
+
+        if parsed["kind"] == "text":
+            text = str(parsed.get("text", "")).strip()
+            if not text:
+                continue
+            _, current_node = stack[-1]
+            existing = str(current_node.get("content", "") or "")
+            if existing and not existing.endswith("\n"):
+                existing += "\n"
+            current_node["content"] = existing + text
+            continue
+
+        level = int(parsed["level"])
+        title = str(parsed["title"])
+        content = str(parsed.get("content", title))
+        is_heading = bool(parsed.get("is_heading", False))
+
         while stack and stack[-1][0] >= level:
             stack.pop()
-        parent_level, parent_node = stack[-1]
+        _, parent_node = stack[-1]
         order = len(parent_node["children"]) + 1
         node = {
             "id": str(counter),
@@ -373,6 +374,80 @@ def _classify_module(title: str) -> str:
     return "module"
 
 
+def _is_introduction_title(title: str) -> bool:
+    t = (title or "").strip().lower()
+    return any(k in t for k in ["introduction", "引言", "简介"])
+
+
+def _is_conclusion_title(title: str) -> bool:
+    t = (title or "").strip().lower()
+    return any(k in t for k in ["conclusion", "conclusions", "结论", "总结"])
+
+
+def _is_abstract_title(title: str) -> bool:
+    t = (title or "").strip().lower()
+    return any(k in t for k in ["abstract", "摘要"])
+
+
+def _is_tail_title(title: str) -> bool:
+    t = (title or "").strip().lower()
+    return any(
+        k in t
+        for k in [
+            "references",
+            "bibliography",
+            "reference",
+            "acknowledg",  # acknowledgements/acknowledgment
+            "appendix",
+            "appendices",
+            "supplementary",
+            "supplemental",
+            "致谢",
+            "参考文献",
+            "引用文献",
+            "附录",
+        ]
+    )
+
+
+def _prune_tree_in_place(node: dict, should_remove: callable) -> None:
+    children = node.get("children") or []
+    kept = []
+    for child in children:
+        title = str(child.get("title", "")).strip()
+        if should_remove(title):
+            continue
+        _prune_tree_in_place(child, should_remove)
+        kept.append(child)
+    node["children"] = kept
+
+
+def _filter_mindmap_root_in_place(root: dict) -> None:
+    top = root.get("children") or []
+    intro_idx = None
+    concl_idx = None
+    for idx, n in enumerate(top):
+        if _is_introduction_title(str(n.get("title", ""))):
+            intro_idx = idx
+            break
+    if intro_idx is not None:
+        for idx in range(intro_idx, len(top)):
+            if _is_conclusion_title(str(top[idx].get("title", ""))):
+                concl_idx = idx
+                break
+
+    def _remove_pred(title: str) -> bool:
+        return _is_abstract_title(title) or _is_tail_title(title)
+
+    if intro_idx is not None and concl_idx is not None and intro_idx <= concl_idx:
+        root["children"] = top[intro_idx : concl_idx + 1]
+        _prune_tree_in_place(root, _remove_pred)
+        return
+
+    root["children"] = [n for n in top if not _remove_pred(str(n.get("title", "")))]
+    _prune_tree_in_place(root, _remove_pred)
+
+
 def _truncate_passages(passages: List[str], max_chars: int, per_passage_chars: int) -> Tuple[str, List[str]]:
     clipped: List[str] = []
     remaining = max_chars
@@ -387,6 +462,43 @@ def _truncate_passages(passages: List[str], max_chars: int, per_passage_chars: i
         remaining -= len(s)
     combined = "\n\n".join([f"[Context {i+1}]\n{p}" for i, p in enumerate(clipped)])
     return combined, clipped
+
+
+def _collect_subtree_nodes(node: dict) -> List[dict]:
+    nodes: List[dict] = []
+
+    def _walk(n: dict):
+        nodes.append(n)
+        for c in n.get("children") or []:
+            _walk(c)
+
+    _walk(node)
+    return nodes
+
+
+def _build_subtree_text(node: dict, max_chars: int = 12000, per_line_chars: int = 600) -> str:
+    lines: List[str] = []
+
+    def _walk(n: dict, depth: int):
+        title = str(n.get("title", "")).strip()
+        content = str(n.get("content", "")).strip()
+        text = content if content else title
+        if title and content and content != title:
+            if content.startswith(title):
+                text = content
+            else:
+                text = f"{title}: {content}"
+        indent = "  " * max(0, depth)
+        if text:
+            lines.append(f"{indent}- {text[:per_line_chars]}")
+        for c in n.get("children") or []:
+            _walk(c, depth + 1)
+
+    _walk(node, 0)
+    out = "\n".join(lines)
+    if len(out) > max_chars:
+        out = out[:max_chars]
+    return out
 
 
 def _extract_main_number(title: str) -> Optional[str]:
@@ -440,7 +552,6 @@ def _select_prompt_path_by_anchor_title(anchor_title: str) -> str:
     module_type = _classify_module(anchor_title)
     mapping = {
         "title": "mind_map/title_prompts",
-        "abstract": "mind_map/abstract_prompts",
         "introduction": "mind_map/introduction_prompts",
         "method": "mind_map/method_prompts",
         "related_work": "mind_map/related_work_prompts",
@@ -636,6 +747,7 @@ def generate_mindmap(request: MindmapRequest):
         with open(md_path, "r", encoding="utf-8") as f_md:
             md_text = f_md.read()
         tree = _parse_markdown_to_tree(md_text, Path(md_path).stem)
+        _filter_mindmap_root_in_place(tree)
         return {
             "status": "success",
             "file": str(md_path),
@@ -723,6 +835,7 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
             md_text = f_md.read()
 
         root = _parse_markdown_to_tree(md_text, Path(md_path).stem)
+        _filter_mindmap_root_in_place(root)
         modules = _flatten_mindmap_nodes(root)
         dataset_name = request.dataset_name or request.doc_name
         if not modules:
@@ -782,14 +895,45 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
             m["_context_text"] = context_text
             m["_context_clipped"] = context_clipped
 
+        id_to_module = {str(m.get("id", "")): m for m in modules if m.get("id") is not None}
+
         def _run_one(module: dict) -> dict:
             anchor_title = _find_chapter_anchor_title(module)
             module_type = _classify_module(anchor_title)
+            node_ref = module.get("_node_ref") or {}
+            subtree_nodes = _collect_subtree_nodes(node_ref) if isinstance(node_ref, dict) else []
+            subtree_ids = [str(n.get("id", "")) for n in subtree_nodes if n.get("id") is not None]
+
+            aggregated_passages: List[str] = []
+            seen = set()
+            for sid in subtree_ids:
+                m2 = id_to_module.get(sid)
+                if not m2:
+                    continue
+                for p in m2.get("_context_clipped") or []:
+                    if p in seen:
+                        continue
+                    seen.add(p)
+                    aggregated_passages.append(p)
+
+            agg_context_text, agg_context_clipped = _truncate_passages(
+                aggregated_passages,
+                max_chars=request.context_max_chars,
+                per_passage_chars=request.context_per_passage_chars,
+            )
+            subtree_text = _build_subtree_text(node_ref, max_chars=request.context_max_chars)
+            combined_input = (
+                "【模块子树内容】\n"
+                f"{subtree_text}\n\n"
+                "【子树检索上下文】\n"
+                f"{agg_context_text}"
+            ).strip()
+
             messages, prompt_meta = _build_module_messages(
                 module_title=module.get("title", ""),
                 module_path=module.get("path", ""),
                 module_type=module_type,
-                context_text=module.get("_context_text", ""),
+                context_text=combined_input,
                 anchor_title=anchor_title,
             )
             answer = rag.llm_model.infer(messages)
@@ -797,6 +941,8 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
                 "llm_answer": answer,
                 "module_type": module_type,
                 "anchor_title": anchor_title,
+                "subtree_node_count": len(subtree_nodes),
+                "context_clipped": agg_context_clipped,
                 **prompt_meta,
             }
 
@@ -820,20 +966,22 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
                             "prompt_version": out.get("prompt_version"),
                             "module_type": out.get("module_type"),
                             "anchor_title": out.get("anchor_title"),
+                            "subtree_node_count": out.get("subtree_node_count"),
                             "llm_answer": out.get("llm_answer"),
                         }
                     )
                     if request.include_context:
-                        result_item["context"] = module.get("_context_clipped", [])
+                        result_item["context"] = out.get("context_clipped") or []
                     if request.include_tree and module.get("_node_ref") is not None:
                         node_ref = module["_node_ref"]
                         node_ref["llm_answer"] = out.get("llm_answer")
                         node_ref["module_type"] = out.get("module_type")
                         node_ref["anchor_title"] = out.get("anchor_title")
+                        node_ref["subtree_node_count"] = out.get("subtree_node_count")
                         node_ref["prompt_id"] = out.get("prompt_id")
                         node_ref["prompt_version"] = out.get("prompt_version")
                         if request.include_context:
-                            node_ref["context"] = module.get("_context_clipped", [])
+                            node_ref["context"] = result_item.get("context", [])
                 except Exception as e:
                     had_errors = True
                     result_item["error"] = str(e)

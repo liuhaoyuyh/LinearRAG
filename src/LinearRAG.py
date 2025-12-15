@@ -21,11 +21,79 @@ class LinearRAG:
         self.llm_model = self.config.llm_model
         self.spacy_ner = SpacyNER(self.config.spacy_model)
         self.graph = ig.Graph(directed=False)
+        self._load_graph_and_mappings_if_available()
+
+    def _load_graph_and_mappings_if_available(self):
+        graphml_path = os.path.join(self.config.working_dir, self.dataset_name, "LinearRAG.graphml")
+        if os.path.exists(graphml_path):
+            try:
+                self.graph = ig.Graph.Read_GraphML(graphml_path)
+            except Exception as e:
+                logger.warning(f"Failed to load GraphML from {graphml_path}: {e}")
+                self.graph = ig.Graph(directed=False)
+
+        if "weight" in self.graph.es.attributes():
+            try:
+                self.graph.es["weight"] = [float(w) for w in self.graph.es["weight"]]
+            except Exception:
+                pass
+
+        try:
+            self.node_name_to_vertex_idx = {v["name"]: v.index for v in self.graph.vs if "name" in v.attributes()}
+            self.vertex_idx_to_node_name = {v.index: v["name"] for v in self.graph.vs if "name" in v.attributes()}
+        except Exception:
+            self.node_name_to_vertex_idx = {}
+            self.vertex_idx_to_node_name = {}
+
+        passage_hash_ids = set(self.passage_embedding_store.hash_id_to_text.keys())
+        self.passage_node_indices = [
+            self.node_name_to_vertex_idx[pid] for pid in passage_hash_ids if pid in self.node_name_to_vertex_idx
+        ]
+
+        self.entity_hash_id_to_sentence_hash_ids = defaultdict(list)
+        self.sentence_hash_id_to_entity_hash_ids = defaultdict(list)
+
+        ner_results_path = os.path.join(self.config.working_dir, self.dataset_name, "ner_results.json")
+        if not os.path.exists(ner_results_path):
+            return
+        try:
+            with open(ner_results_path, "r", encoding="utf-8") as f:
+                ner_results = json.load(f) or {}
+        except Exception as e:
+            logger.warning(f"Failed to load NER results from {ner_results_path}: {e}")
+            return
+
+        sentence_to_entities = ner_results.get("sentence_to_entities") or {}
+        for sentence_text, entities in sentence_to_entities.items():
+            if sentence_text not in self.sentence_embedding_store.text_to_hash_id:
+                continue
+            sentence_hash_id = self.sentence_embedding_store.text_to_hash_id[sentence_text]
+            entity_hash_ids = []
+            for ent in entities or []:
+                if ent in self.entity_embedding_store.text_to_hash_id:
+                    entity_hash_ids.append(self.entity_embedding_store.text_to_hash_id[ent])
+            if entity_hash_ids:
+                self.sentence_hash_id_to_entity_hash_ids[sentence_hash_id] = entity_hash_ids
+                for entity_hash_id in entity_hash_ids:
+                    self.entity_hash_id_to_sentence_hash_ids[entity_hash_id].append(sentence_hash_id)
 
     def load_embedding_store(self):
         self.passage_embedding_store = EmbeddingStore(self.config.embedding_model, db_filename=os.path.join(self.config.working_dir,self.dataset_name, "passage_embedding.parquet"), batch_size=self.config.batch_size, namespace="passage")
         self.entity_embedding_store = EmbeddingStore(self.config.embedding_model, db_filename=os.path.join(self.config.working_dir,self.dataset_name, "entity_embedding.parquet"), batch_size=self.config.batch_size, namespace="entity")
         self.sentence_embedding_store = EmbeddingStore(self.config.embedding_model, db_filename=os.path.join(self.config.working_dir,self.dataset_name, "sentence_embedding.parquet"), batch_size=self.config.batch_size, namespace="sentence")
+
+    def _graph_search_ready(self) -> bool:
+        if self.graph is None or self.graph.vcount() == 0:
+            return False
+        if not getattr(self, "node_name_to_vertex_idx", None):
+            return False
+        if not getattr(self, "passage_node_indices", None):
+            return False
+        if not getattr(self, "entity_hash_id_to_sentence_hash_ids", None):
+            return False
+        if not getattr(self, "sentence_hash_id_to_entity_hash_ids", None):
+            return False
+        return True
 
     def load_existing_data(self,passage_hash_ids):
         self.ner_results_path = os.path.join(self.config.working_dir,self.dataset_name, "ner_results.json")
@@ -86,7 +154,7 @@ class LinearRAG:
             question = question_info["question"]
             question_embedding = self.config.embedding_model.encode(question,normalize_embeddings=True,show_progress_bar=False,batch_size=self.config.batch_size)
             seed_entity_indices,seed_entities,seed_entity_hash_ids,seed_entity_scores = self.get_seed_entities(question)
-            if len(seed_entities) != 0:
+            if len(seed_entities) != 0 and self._graph_search_ready():
                 sorted_passage_hash_ids,sorted_passage_scores = self.graph_search_with_seed_entities(question_embedding,seed_entity_indices,seed_entities,seed_entity_hash_ids,seed_entity_scores)
                 final_passage_hash_ids = sorted_passage_hash_ids[:self.config.retrieval_top_k]
                 final_passage_scores = sorted_passage_scores[:self.config.retrieval_top_k]

@@ -1,8 +1,6 @@
 from hashlib import md5
 from dataclasses import dataclass, field
 from typing import List, Dict
-import httpx
-from openai import OpenAI
 from collections import defaultdict
 import multiprocessing as mp
 import re
@@ -11,26 +9,25 @@ import logging
 import numpy as np
 import os
 from dotenv import load_dotenv
+from src.model_client import ModelRequest, create_model_client_from_env
 load_dotenv()
 def compute_mdhash_id(content: str, prefix: str = "") -> str:
     return prefix + md5(content.encode()).hexdigest()
 
 class LLM_Model:
     def __init__(self, llm_model):
-        http_client = httpx.Client(timeout=60.0, trust_env=False)
-        self.openai_client = OpenAI(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            base_url=os.getenv("OPENAI_BASE_URL"),
-            http_client=http_client
-        )
-        self.llm_config = {
-            "model": llm_model,
-            "max_tokens": 2000,
-            "temperature": 0,
-        }
+        self._client = create_model_client_from_env(default_model=llm_model)
+        self._max_tokens = 2000
+        self._temperature = 0
     def infer(self, messages):
-        response = self.openai_client.chat.completions.create(**self.llm_config,messages=messages)
-        return response.choices[0].message.content
+        response = self._client.generate(
+            ModelRequest(
+                messages=messages,
+                max_tokens=self._max_tokens,
+                temperature=self._temperature,
+            )
+        )
+        return response.content
 
 
 

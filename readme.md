@@ -65,6 +65,25 @@ export OPENAI_API_KEY="your-api-key-here"
 export OPENAI_BASE_URL="your-base-url-here"
 ```
 
+**Optional: Configure Model Client (multi-backend)**
+
+```bash
+# Provider selection: openai (default) / mock (offline)
+export LLM_PROVIDER="openai"
+
+# Retry & timeout
+export LLM_TIMEOUT_S="60"
+export LLM_MAX_RETRIES="3"
+export LLM_RETRY_BACKOFF_S="0.5"
+```
+
+离线验证（不访问网络）可以使用：
+
+```bash
+export LLM_PROVIDER="mock"
+python scripts/validate_model_client_mock.py
+```
+
 **Step 4: Download Datasets**
 
 Download the datasets from HuggingFace and place them in the `dataset/` folder:
@@ -182,6 +201,26 @@ curl -X POST http://localhost:8000/mindmap \
 
 服务会在 `output/mineru/<doc_name>/` 下选取时间戳目录名最大的记录，读取 `<doc_name>/<doc_name>.md`，并返回思维导图树。
 
+#### 思维导图模块解释（并发、非流式）
+
+对思维导图树除根节点外的每个模块：用“模块标题 + 检索到的上下文 + 模块提示词”并发调用大模型，返回每个模块的解释内容（单模块不做流式输出）。
+
+前置条件：
+- 已生成 `dataset/<doc_name>/chunks.json`（可通过 `/markdown/chunk` 生成）
+- 已调用 `/index` 完成索引构建（`dataset_name` 需与 `doc_name` 一致，或在请求中指定 `dataset_name`）
+
+```bash
+curl -X POST http://localhost:8000/mindmap/explain \
+  -H "Content-Type: application/json" \
+  -d '{
+    "doc_name": "sustainability-16-02641-v2",
+    "module_max_workers": 8,
+    "retrieval_top_k": 5,
+    "include_tree": true,
+    "include_context": true
+  }'
+```
+
 #### content_list 转 chunk
 
 将 MinerU 的 `_content_list.json` 转为标准分块文件 `data/<doc_name>/chunk.json`。
@@ -198,7 +237,7 @@ curl -X POST http://localhost:8000/content/chunk \
 
 #### Markdown 转 chunk
 
-将 MinerU 生成的 Markdown 直接分块写入 `data/<doc_name>/chunk.json`。
+将 MinerU 生成的 Markdown 直接分块写入 `dataset/<doc_name>/chunks.json`。
 
 ```bash
 curl -X POST http://localhost:8000/markdown/chunk \

@@ -141,6 +141,8 @@ class MindmapExplainResponse(BaseModel):
     doc_name: str
     dataset_name: str
     markdown_path: str
+    explain_markdown_path: Optional[str] = None
+    explain_markdown: Optional[str] = None
     module_count: int
     results: List[MindmapExplainResultItem]
     root: Optional[dict] = None
@@ -503,6 +505,33 @@ def _build_subtree_text(node: dict, max_chars: int = 12000, per_line_chars: int 
     return out
 
 
+def _mindmap_root_to_explain_markdown(root: dict) -> str:
+    lines: List[str] = []
+
+    def _walk(node: dict):
+        for child in node.get("children") or []:
+            title = str(child.get("title", "")).strip()
+            level = int(child.get("level") or 1)
+            heading_level = min(max(level, 1), 6)
+            if title:
+                lines.append(f"{'#' * heading_level} {title}")
+                lines.append("")
+
+            answer = child.get("llm_answer")
+            if isinstance(answer, str) and answer.strip():
+                lines.append(answer.strip())
+                lines.append("")
+
+            _walk(child)
+
+    if isinstance(root, dict):
+        _walk(root)
+
+    if not lines:
+        return ""
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _extract_main_number(title: str) -> Optional[str]:
     t = (title or "").strip()
     m = re.match(r"^(\d+)(?:\.\d+)*", t)
@@ -846,6 +875,8 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
                 "doc_name": request.doc_name,
                 "dataset_name": dataset_name,
                 "markdown_path": str(md_path),
+                "explain_markdown_path": None,
+                "explain_markdown": None,
                 "module_count": 0,
                 "results": [],
                 "root": root if request.include_tree else None,
@@ -1045,11 +1076,21 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
         results.sort(key=lambda x: (int(x["id"]) if x.get("id", "").isdigit() else 10**9, str(x.get("path", ""))))
         status = "partial_success" if had_errors else "success"
 
+        explain_md_path = None
+        explain_md = None
+        if request.include_tree and isinstance(root, dict):
+            explain_md = _mindmap_root_to_explain_markdown(root)
+            explain_md_path = os.path.join(output_dir, "mindmap_explain.md")
+            with open(explain_md_path, "w", encoding="utf-8") as f_md_out:
+                f_md_out.write(explain_md)
+
         return {
             "status": status,
             "doc_name": request.doc_name,
             "dataset_name": dataset_name,
             "markdown_path": str(md_path),
+            "explain_markdown_path": explain_md_path,
+            "explain_markdown": explain_md,
             "module_count": len(modules),
             "results": results,
             "root": root if request.include_tree else None,

@@ -206,6 +206,7 @@ curl -X POST http://localhost:8000/mindmap \
 
 对思维导图树除根节点外的每个模块：用“模块标题 + 检索到的上下文 + 模块提示词”并发调用大模型，返回每个模块的解释内容（单模块不做流式输出）。
 解释范围与 `/mindmap` 一致（Introduction→Conclusion；或退化删除 Abstract/References/尾部章节），并且解释输入为“该模块子树内容 + 子树检索上下文”。
+解释完成后会基于同一份 `root` 树（节点含 `llm_answer`）额外生成一份仅包含“标题 + llm_answer”的 Markdown，并落盘到 `results/<dataset_name>/<timestamp>/mindmap_explain.md`，同时在响应中返回 `explain_markdown` 与 `explain_markdown_path`。
 
 前置条件：
 - 已生成 `dataset/<doc_name>/chunks.json`（可通过 `/markdown/chunk` 生成）

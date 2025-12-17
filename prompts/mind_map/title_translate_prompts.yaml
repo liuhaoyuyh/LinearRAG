@@ -1,0 +1,15 @@
+# Title Translation Prompt
+# 用途：将思维导图模块标题翻译为简体中文（仅输出标题译文）
+id: paper_explain.title_translate
+version: "1.0.0"
+description: Translate a mindmap module title into Simplified Chinese; output only the translated title.
+template: |
+  你将把一个文档/论文的章节或模块标题翻译为简体中文。
+
+  约束：
+  - 只输出翻译后的标题文本，不要添加任何解释、前缀、引号或额外标点。
+  - 保留标题中的编号/层级前缀（如 `1.2`, `3)`, `IV` 等）与必要的专有名词/缩写。
+  - 如果标题已是中文或无需翻译，原样输出。
+
+  标题：
+  {{ title }}

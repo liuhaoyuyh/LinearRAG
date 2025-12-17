@@ -508,11 +508,20 @@ def _build_subtree_text(node: dict, max_chars: int = 12000, per_line_chars: int 
 def _mindmap_root_to_explain_markdown(root: dict) -> str:
     lines: List[str] = []
 
+    def _export_heading_level(node: dict) -> int:
+        title = str(node.get("title_zh") or node.get("title", "")).strip()
+        m = re.match(r"^\s*(\d+(?:\.\d+)*)", title)
+        if m:
+            segs = [s for s in m.group(1).split(".") if s.strip() != ""]
+            if segs:
+                return min(max(len(segs), 1), 6)
+        level = int(node.get("level") or 1)
+        return min(max(level, 1), 6)
+
     def _walk(node: dict):
         for child in node.get("children") or []:
-            title = str(child.get("title", "")).strip()
-            level = int(child.get("level") or 1)
-            heading_level = min(max(level, 1), 6)
+            title = str(child.get("title_zh") or child.get("title", "")).strip()
+            heading_level = _export_heading_level(child)
             if title:
                 lines.append(f"{'#' * heading_level} {title}")
                 lines.append("")
@@ -530,6 +539,119 @@ def _mindmap_root_to_explain_markdown(root: dict) -> str:
     if not lines:
         return ""
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _looks_like_already_chinese(title: str) -> bool:
+    t = (title or "").strip()
+    if not t:
+        return True
+    has_cjk = re.search(r"[\u4e00-\u9fff]", t) is not None
+    has_ascii_alpha = re.search(r"[A-Za-z]", t) is not None
+    return has_cjk and not has_ascii_alpha
+
+
+def _split_number_prefix(title: str) -> Tuple[str, str]:
+    t = (title or "").strip()
+    if not t:
+        return "", ""
+    m = re.match(r"^(\d+(?:\.\d+)*[.)]?)\s+(.*)$", t)
+    if not m:
+        return "", t
+    prefix = m.group(1).strip()
+    rest = (m.group(2) or "").strip()
+    if not rest:
+        return "", t
+    return f"{prefix} ", rest
+
+
+def _clean_single_line(text: str) -> str:
+    if not isinstance(text, str):
+        text = str(text or "")
+    s = text.strip()
+    if not s:
+        return ""
+    for line in s.splitlines():
+        line = line.strip()
+        if line:
+            s = line
+            break
+    s = s.strip().strip("`").strip().strip('"').strip("'").strip()
+    return s
+
+
+def _build_title_translate_messages(title: str) -> Tuple[List[dict], dict]:
+    system = PromptLoader.load("mind_map/system_prompts")
+    user = PromptLoader.load("mind_map/title_translate_prompts")
+    user_text = user.render(title=title)
+    return (
+        [
+            {"role": "system", "content": system.template},
+            {"role": "user", "content": user_text},
+        ],
+        {"prompt_id": user.id, "prompt_version": user.version},
+    )
+
+
+def _translate_title_to_zh(llm_model: LLM_Model, title: str) -> str:
+    raw = str(title or "").strip()
+    if not raw:
+        return ""
+    if _looks_like_already_chinese(raw):
+        return raw
+
+    prefix, rest = _split_number_prefix(raw)
+    target = rest if prefix else raw
+    try:
+        messages, _ = _build_title_translate_messages(target)
+        response = llm_model.generate(messages)
+        translated = _clean_single_line(getattr(response, "content", ""))
+        if not translated:
+            return raw
+        return f"{prefix}{translated}" if prefix else translated
+    except Exception:
+        return raw
+
+
+def _translate_mindmap_titles_in_place(root: dict, llm_model: LLM_Model, max_workers: int) -> None:
+    if not isinstance(root, dict):
+        return
+
+    unique_titles: List[str] = []
+    seen = set()
+
+    def _collect(node: dict):
+        for child in node.get("children") or []:
+            title = str(child.get("title", "")).strip()
+            if title and title not in seen:
+                seen.add(title)
+                unique_titles.append(title)
+            if isinstance(child, dict):
+                _collect(child)
+
+    _collect(root)
+    if not unique_titles:
+        return
+
+    title_map: dict = {}
+    worker_count = max(1, int(max_workers or 1))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        future_to_title = {executor.submit(_translate_title_to_zh, llm_model, t): t for t in unique_titles}
+        for future in as_completed(future_to_title):
+            title = future_to_title[future]
+            try:
+                title_map[title] = str(future.result() or "").strip() or title
+            except Exception:
+                title_map[title] = title
+
+    def _apply(node: dict):
+        for child in node.get("children") or []:
+            title = str(child.get("title", "")).strip()
+            if title:
+                child["title_zh"] = title_map.get(title, title)
+            if isinstance(child, dict):
+                _apply(child)
+
+    _apply(root)
 
 
 def _extract_main_number(title: str) -> Optional[str]:
@@ -1079,6 +1201,7 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
         explain_md_path = None
         explain_md = None
         if request.include_tree and isinstance(root, dict):
+            _translate_mindmap_titles_in_place(root, rag.llm_model, max_workers=request.module_max_workers)
             explain_md = _mindmap_root_to_explain_markdown(root)
             explain_md_path = os.path.join(output_dir, "mindmap_explain.md")
             with open(explain_md_path, "w", encoding="utf-8") as f_md_out:

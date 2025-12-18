@@ -98,7 +98,7 @@ class MindmapExplainRequest(BaseModel):
     )
     embedding_model: str = Field("model/all-mpnet-base-v2", description="SentenceTransformer 模型名称或路径")
     spacy_model: str = Field("en_core_web_trf", description="spaCy 模型名称")
-    llm_model: str = Field("gpt-4o-mini", description="OpenAI ChatCompletions 模型名称")
+    llm_model: str = Field("qwen-plus", description="OpenAI ChatCompletions 模型名称")
     working_dir: str = Field("./import", description="索引输出目录")
     batch_size: int = Field(128, ge=1)
     retrieval_top_k: int = Field(5, ge=1, description="每个模块检索返回的 top-k 上下文数量")
@@ -670,7 +670,24 @@ def _extract_number_prefix(title: str) -> Optional[str]:
     return m.group(1)
 
 
-def _find_chapter_anchor_title(module: dict) -> str:
+def _build_main_num_to_anchor_title(modules: List[dict]) -> dict:
+    out: dict = {}
+    for m in modules or []:
+        title = str(m.get("title", "")).strip()
+        if not title:
+            continue
+        num_prefix = _extract_number_prefix(title)
+        if not num_prefix:
+            continue
+        if len([s for s in num_prefix.split(".") if s.strip() != ""]) != 1:
+            continue
+        main_num = num_prefix.split(".")[0].strip()
+        if main_num and main_num not in out:
+            out[main_num] = title
+    return out
+
+
+def _find_chapter_anchor_title(module: dict, main_num_to_anchor_title: Optional[dict] = None) -> str:
     title = module.get("title") or ""
     main_num = _extract_main_number(title)
     ancestors = module.get("_ancestors") or []
@@ -688,15 +705,33 @@ def _find_chapter_anchor_title(module: dict) -> str:
                 continue
             if len(num_prefix.split(".")) == 1:
                 return cand_title
+        if isinstance(main_num_to_anchor_title, dict):
+            cand = main_num_to_anchor_title.get(main_num)
+            if isinstance(cand, str) and cand.strip():
+                return cand.strip()
 
-    for node in reversed(ancestors):
+    if ancestors:
         try:
-            if int(node.get("level") or 0) == 1:
-                cand_title = _title_of(node)
-                if cand_title:
-                    return cand_title
+            oldest_title = _title_of(ancestors[0])
+            if oldest_title:
+                return oldest_title
+        except Exception:
+            pass
+
+    best_node = None
+    best_level = None
+    for node in ancestors:
+        try:
+            lvl = int(node.get("level") or 0)
         except Exception:
             continue
+        if best_level is None or lvl < best_level:
+            best_level = lvl
+            best_node = node
+    if best_node is not None:
+        cand_title = _title_of(best_node)
+        if cand_title:
+            return cand_title
 
     return title
 
@@ -1056,9 +1091,10 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
             m["_context_clipped"] = context_clipped
 
         id_to_module = {str(m.get("id", "")): m for m in modules if m.get("id") is not None}
+        main_num_to_anchor_title = _build_main_num_to_anchor_title(modules)
 
         def _run_one(module: dict) -> dict:
-            anchor_title = _find_chapter_anchor_title(module)
+            anchor_title = _find_chapter_anchor_title(module, main_num_to_anchor_title=main_num_to_anchor_title)
             module_type = _classify_module(anchor_title)
             node_ref = module.get("_node_ref") or {}
             subtree_nodes = _collect_subtree_nodes(node_ref) if isinstance(node_ref, dict) else []

@@ -30,7 +30,7 @@ class BaseRunConfig(BaseModel):
     dataset_name: str = Field(..., description="数据集名称，需存在于 dataset/<name>/")
     embedding_model: str = Field("model/all-mpnet-base-v2", description="SentenceTransformer 模型名称或路径")
     spacy_model: str = Field("en_core_web_trf", description="spaCy 模型名称")
-    llm_model: str = Field("qwen-plus", description="OpenAI ChatCompletions 模型名称")
+    llm_model: str = Field("qwen3-vl-flash", description="OpenAI ChatCompletions 模型名称")
     working_dir: str = Field("./import", description="索引输出目录")
     batch_size: int = Field(128, ge=1)
     max_workers: int = Field(16, ge=1)
@@ -59,7 +59,7 @@ class QARequest(BaseRunConfig):
 class EvaluateRequest(BaseModel):
     dataset_name: str = Field(..., description="数据集名称，用于返回信息")
     predictions_path: str = Field(..., description="预测结果 JSON 路径")
-    llm_model: str = Field("qwen-plus", description="OpenAI ChatCompletions 模型名称")
+    llm_model: str = Field("qwen3-vl-flash", description="OpenAI ChatCompletions 模型名称")
     max_workers: int = Field(16, ge=1)
 
 
@@ -98,7 +98,7 @@ class MindmapExplainRequest(BaseModel):
     )
     embedding_model: str = Field("model/all-mpnet-base-v2", description="SentenceTransformer 模型名称或路径")
     spacy_model: str = Field("en_core_web_trf", description="spaCy 模型名称")
-    llm_model: str = Field("qwen-plus", description="OpenAI ChatCompletions 模型名称")
+    llm_model: str = Field("qwen3-vl-flash", description="OpenAI ChatCompletions 模型名称")
     working_dir: str = Field("./import", description="索引输出目录")
     batch_size: int = Field(128, ge=1)
     retrieval_top_k: int = Field(5, ge=1, description="每个模块检索返回的 top-k 上下文数量")

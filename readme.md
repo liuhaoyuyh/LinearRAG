@@ -1,41 +1,3 @@
-# **LinearRAG: Linear Graph Retrieval-Augmented Generation on Large-scale Corpora**
-
-> A relation-free graph construction method for efficient GraphRAG. It eliminates LLM token costs during graph construction, making GraphRAG faster and more efficient than ever.
-
-<p align="center">
-  <a href="https://arxiv.org/abs/2510.10114" target="_blank">
-    <img src="https://img.shields.io/badge/Paper-Arxiv-red?logo=arxiv&style=flat-square" alt="arXiv:2506.08938">
-  </a>
-  <a href="https://huggingface.co/datasets/Zly0523/linear-rag/tree/main" target="_blank">
-    <img src="https://img.shields.io/badge/HuggingFace-Model-yellow?logo=huggingface&style=flat-square" alt="HuggingFace">
-  </a>
-  <a href="https://github.com/LuyaoZhuang/linear-rag" target="_blank">
-    <img src="https://img.shields.io/badge/GitHub-Project-181717?logo=github&style=flat-square" alt="GitHub">
-  </a>
-</p>
-
----
-
-## 🚀 **Highlights**
-
-- ✅ **Context-Preserving**: Relation-free graph construction, relying on lightweight entity recognition and semantic linking to achieve comprehensive contextual comprehension.
-- ✅ **Complex Reasoning**: Enables deep retrieval via semantic bridging, achieving multi-hop reasoning in a single retrieval pass without requiring explicit relational graphs.
-- ✅ **High Scalability**: Zero LLM token consumption, faster processing speed, and linear time/space complexity.
-
-<p align="center">
-  <img src="figure/main_figure.png" width="95%" alt="Framework Overview">
-</p>
-
----
-
-## 🎉 **News**
-
-- **[2025-10-27]** We release **[LinearRAG](https://github.com/DEEP-PolyU/LinearRAG)**, a relation-free graph construction method for efficient GraphRAG.
-- **[2025-06-06]** We release **[GraphRAG-Bench](https://github.com/GraphRAG-Bench/GraphRAG-Benchmark.git)**, the benchmark for evaluating GraphRAG models.
-- **[2025-01-21]** We release the **[GraphRAG survey](https://github.com/DEEP-PolyU/Awesome-GraphRAG)**.
-
----
-
 ## 🛠️ **Usage**
 
 ### 1️⃣ Install Dependencies
@@ -52,13 +14,13 @@ pip install -r requirements.txt
 python -m spacy download en_core_web_trf
 ```
 
-> **Note:** For the `medical` dataset, you need to install the scientific/biomedical Spacy model:
-
 ```bash
 pip install https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.3/en_core_sci_scibert-0.5.3.tar.gz
 ```
 
 **Step 3: Set up your OpenAI API key**
+
+已经设置好，在.env里
 
 ```bash
 export OPENAI_API_KEY="your-api-key-here"
@@ -66,6 +28,8 @@ export OPENAI_BASE_URL="your-base-url-here"
 ```
 
 **Optional: Configure Model Client (multi-backend)**
+
+默认即可
 
 ```bash
 # Provider selection: openai (default) / mock (offline)
@@ -77,23 +41,8 @@ export LLM_MAX_RETRIES="3"
 export LLM_RETRY_BACKOFF_S="0.5"
 ```
 
-离线验证（不访问网络）可以使用：
 
-```bash
-export LLM_PROVIDER="mock"
-python scripts/validate_model_client_mock.py
-```
-
-**Step 4: Download Datasets**
-
-Download the datasets from HuggingFace and place them in the `dataset/` folder:
-
-```bash
-git clone https://huggingface.co/datasets/Zly0523/linear-rag
-cp -r linear-rag/dataset/* dataset/
-```
-
-**Step 5: Prepare Embedding Model**
+**Step 4: Prepare Embedding Model**
 
 Make sure the embedding model is available at:
 
@@ -101,22 +50,12 @@ Make sure the embedding model is available at:
 model/all-mpnet-base-v2/
 ```
 
-### 2️⃣ Quick Start Example
+百度网盘链接：
 
 ```bash
-SPACY_MODEL="en_core_web_trf"
-EMBEDDING_MODEL="model/all-mpnet-base-v2"
-DATASET_NAME="2wikimultihop"
-LLM_MODEL="qwen-plus"
-MAX_WORKERS=16
-
-python run.py \
-    --spacy_model ${SPACY_MODEL} \
-    --embedding_model ${EMBEDDING_MODEL} \
-    --dataset_name ${DATASET_NAME} \
-    --llm_model ${LLM_MODEL} \
-    --max_workers ${MAX_WORKERS}
+ https://pan.baidu.com/s/19CMaF0rvysxIIAU2lwrapw?pwd=zmcf
 ```
+
 
 ### 3️⃣ FastAPI 服务
 
@@ -154,18 +93,6 @@ curl -X POST http://localhost:8000/qa \
   }'
 ```
 
-- 评测（基于预测结果路径）：
-
-```bash
-curl -X POST http://localhost:8000/evaluate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dataset_name": "medical",
-    "predictions_path": "results/medical/<timestamp>/predictions.json"
-  }'
-```
-
-> 提醒：需要提前设置 `OPENAI_API_KEY`（可选 `OPENAI_BASE_URL`），并确保 SentenceTransformer 与 spaCy 模型已下载到对应目录。
 
 #### MinerU 文档解析
 
@@ -251,44 +178,3 @@ curl -X POST http://localhost:8000/markdown/chunk \
 ```
 
 服务会在 `output/mineru/<doc_name>/` 下选取时间戳目录名最大的目录，读取 `<doc_name>/<doc_name>.md`，按配置的 `chunk_token_size` 与 `chunk_overlap_token_size` 空格分词生成分块。
-
-## 🎯 **Performance**
-
-<div align="center">
-<img src="figure/generation_results.png" alt="framework" width="1000">
-
-**Main results of end-to-end performance**
-
-</div>
-<div align="center">
-<img src="figure/efficiency_result.png" alt="framework" width="1000">
-
-
-
-
-![framework](figure/efficiency_result.png)
-
-![framework](figure/efficiency_result.png)
-
-**Efficiency and performance comparison.**
-
-</div>
-
-## 📖 Citation
-
-If you find this work helpful, please consider citing us:
-
-```bibtex
-@article{zhuang2025linearrag,
-  title={LinearRAG: Linear Graph Retrieval Augmented Generation on Large-scale Corpora},
-  author={Zhuang, Luyao and Chen, Shengyuan and Xiao, Yilin and Zhou, Huachi and Zhang, Yujing and Chen, Hao and Zhang, Qinggang and Huang, Xiao},
-  journal={arXiv preprint arXiv:2510.10114},
-  year={2025}
-}
-```
-
-This project is licensed under the GNU General Public License v3.0 ([License](LICENSE.TXT)).
-
-## 📬 Contact
-
-✉️ Email: zhuangluyao523@gmail.com

@@ -1,0 +1,50 @@
+# Related Work Explanation Prompt
+# 用途：解释已有研究及论文的研究定位
+id: paper_explain.related_work
+version: "1.0.0"
+description: Explain how the paper relates to and differs from existing research.
+template: |
+  You are a literature review assistant.
+
+  # 你是一个文献综述助手。
+
+  Task:
+  Explain the related work section in a way that highlights research categories and positioning.
+
+  # 任务：
+  # 解释相关工作部分，突出已有研究的分类以及本文的研究定位。
+
+  Instructions:
+  - Group prior work into categories if possible.
+  - Explain what each category of work mainly focuses on.
+  - Describe how the current paper differs from existing work.
+  - Do not evaluate the quality of prior work.
+
+  # 指示：
+  # - 尽量将已有研究按类别进行归纳。
+  # - 解释每一类研究主要关注的问题。
+  # - 说明本文与已有工作的区别。
+  # - 不对已有工作的优劣进行评价。
+
+  Related Work Section:
+  <<PAPER_CONTENT>>
+
+  # 相关工作内容
+
+  Output Format:
+  Categories of prior research:
+  - Category 1:
+    - Main focus:
+  - Category 2:
+    - Main focus:
+
+  Position of the current paper:
+
+  # 输出格式：
+  # 已有研究的主要类别：
+  # - 类别一：
+  #   - 主要研究内容：
+  # - 类别二：
+  #   - 主要研究内容：
+  #
+  # 本文的研究定位：

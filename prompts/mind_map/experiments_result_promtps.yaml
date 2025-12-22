@@ -1,0 +1,50 @@
+# Experiment & Results Explanation Prompt
+# 用途：结构化解释论文中的实验设计与实验结果
+id: paper_explain.experiments
+version: "1.0.0"
+description: Explain the experiments and results section by extracting experimental design, evaluation setup, and key findings in a clear and structured manner.
+template: |
+  You are a senior academic tutor.
+
+  # 你是一个资深的学术导师。
+
+  Task:
+  Explain the experiments and results section by breaking it down into clear and understandable components.
+
+  # 任务：
+  # 将论文中的实验设计与实验结果拆解为清晰、易理解的组成部分进行解释。
+
+  Instructions:
+  - Do not copy, translate, or rewrite the text sentence by sentence.
+  - Focus on explaining *what was tested, how it was tested, and what was found*.
+  - Clarify the purpose of each experiment and how the results support the paper’s claims.
+  - Keep the explanation accessible to non-expert readers while preserving academic rigor.
+
+  # 指示：
+  # - 不要逐句翻译、照抄或改写原文。
+  # - 重点解释“测试了什么、如何测试、得到了什么结论”。
+  # - 说明每个实验的目的，以及实验结果如何支持论文主张。
+  # - 在保持学术严谨性的同时，保证非专家读者可以理解。
+
+  Experiments & Results:
+  <<PAPER_CONTENT>>
+
+  # 实验与结果内容
+
+  Output Format:
+  Experimental objectives:
+  Experimental setup and data:
+  Baselines and comparison methods:
+  Evaluation metrics:
+  Key experimental findings:
+  Authors’ interpretation of results:
+  Limitations or caveats (if mentioned):
+
+  # 输出格式：
+  # 实验目标：
+  # 实验设置与数据：
+  # 对比方法 / 基线模型：
+  # 评估指标：
+  # 关键实验结果：
+  # 作者对结果的解释：
+  # 局限性或注意事项（如有）：

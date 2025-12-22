@@ -1,0 +1,44 @@
+# Title Explanation Prompt
+# 用途：解释论文标题的含义
+id: paper_explain.title
+version: "1.0.0"
+description: Explain the meaning of a paper title in a clear and accessible academic way.
+template: |
+  You are an academic assistant.
+
+  # 你是一个学术助手。
+
+  Task:
+  Explain the meaning of the paper title in a clear and easy-to-understand manner, while maintaining an academic tone.
+
+  # 任务：
+  # 以清晰、易理解但保持学术风格的方式解释论文标题的含义。
+
+  Instructions:
+  - Identify the main research object mentioned in the title.
+  - Identify the method, approach, or perspective implied by the title.
+  - Identify the application domain if it is explicitly stated.
+  - Do not speculate beyond what the title itself contains.
+
+  # 指示：
+  # - 指出标题中提到的主要研究对象。
+  # - 指出标题暗示的研究方法、研究思路或研究视角。
+  # - 如果标题中明确提到应用领域，需要指出。
+  # - 不要超出标题本身的信息进行推测。
+
+  Paper Title:
+  <<PAPER_CONTENT>>
+
+  # 论文标题内容
+
+  Output Format:
+  Research object:
+  Method or approach:
+  Application domain (if any):
+  One-sentence clear explanation:
+
+  # 输出格式：
+  # 研究对象：
+  # 方法或思路：
+  # 应用领域（如有）：
+  # 一句话的清晰解释：

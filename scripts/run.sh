@@ -4,7 +4,7 @@ cd /mnt/data/lyzhuang/linear-rag
 # SPACY_MODEL="en_core_sci_scibert"
 # EMBEDDING_MODEL="model/all-mpnet-base-v2"
 # DATASET="medical"
-# LLM_MODEL="gpt-4o-mini"
+# LLM_MODEL="qwen-plus"
 # MAX_WORKERS=16
 # MAX_ITERATION=3
 # PASSAGE_RATIO=1.5
@@ -15,7 +15,7 @@ cd /mnt/data/lyzhuang/linear-rag
 # SPACY_MODEL="en_core_web_trf"
 # EMBEDDING_MODEL="model/all-mpnet-base-v2"
 # DATASET="musique_1"
-# LLM_MODEL="gpt-4o-mini"
+# LLM_MODEL="qwen-plus"
 # MAX_WORKERS=16
 # MAX_ITERATION=5
 # PASSAGE_RATIO=2.0
@@ -26,7 +26,7 @@ cd /mnt/data/lyzhuang/linear-rag
 # SPACY_MODEL="en_core_web_trf"
 # EMBEDDING_MODEL="model/all-mpnet-base-v2"
 # DATASET="2wikimultihop"
-# LLM_MODEL="gpt-4o-mini"
+# LLM_MODEL="qwen-plus"
 # MAX_WORKERS=16
 # MAX_ITERATION=3
 # PASSAGE_RATIO=0.05
@@ -37,7 +37,7 @@ cd /mnt/data/lyzhuang/linear-rag
 # SPACY_MODEL="en_core_web_trf"
 # EMBEDDING_MODEL="model/all-mpnet-base-v2"
 # DATASET="hotpotqa"
-# LLM_MODEL="gpt-4o-mini"
+# LLM_MODEL="qwen-plus"
 # MAX_WORKERS=16
 # MAX_ITERATION=3
 # PASSAGE_RATIO=0.05

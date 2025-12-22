@@ -19,7 +19,7 @@ def parse_arguments():
     parser.add_argument("--spacy_model", type=str, default="en_core_web_trf", help="The spacy model to use")
     parser.add_argument("--embedding_model", type=str, default="model/all-mpnet-base-v2", help="The path of embedding model to use")
     parser.add_argument("--dataset_name", type=str, default="medical", help="The dataset to use")
-    parser.add_argument("--llm_model", type=str, default="gpt-4o-mini", help="The LLM model to use")
+    parser.add_argument("--llm_model", type=str, default="qwen-plus", help="The LLM model to use")
     parser.add_argument("--max_workers", type=int, default=16, help="The max number of workers to use")
     parser.add_argument("--max_iterations", type=int, default=3, help="The max number of iterations to use")
     parser.add_argument("--iteration_threshold", type=float, default=0.4, help="The threshold for iteration")

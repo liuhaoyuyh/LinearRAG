@@ -4,6 +4,10 @@
 
 **Step 1: Install Python packages**
 
+此环境仅为linearrag环境，mineru环境需要另装
+
+python=3.9
+
 ```bash
 pip install -r requirements.txt
 ```

@@ -7,6 +7,7 @@ import re
 import base64
 import mimetypes
 import zipfile
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 
@@ -20,6 +21,7 @@ from src.LinearRAG import LinearRAG
 from src.config import LinearRAGConfig
 from src.evaluate import Evaluator
 from src.utils import LLM_Model, estimate_message_tokens, estimate_token_count, setup_logging
+from src.model_client import create_openai_client, get_default_timeout_s
 from prompts.loader import PromptLoader
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -111,6 +113,18 @@ class MindmapExplainRequest(BaseModel):
     iteration_threshold: float = Field(0.5, gt=0)
 
     module_max_workers: int = Field(8, ge=1, description="模块解释并发数（LLM 调用并发）")
+    use_batch: bool = Field(
+        default=False,
+        description="是否启用 batch 推理（默认关闭）",
+    )
+    batch_completion_window: str = Field(
+        default="24h",
+        description="batch completion window（如 24h）",
+    )
+    batch_poll_interval_s: int = Field(
+        default=10,
+        description="batch 轮询间隔秒数",
+    )
     include_tree: bool = Field(True, description="是否返回带回答的树结构")
     include_context: bool = Field(True, description="是否在结果中包含检索到的上下文")
     include_breadcrumb_in_query: bool = Field(
@@ -159,6 +173,8 @@ def _resolve_path(path_str: str, base: Path = BASE_DIR, allow_missing: bool = Fa
     if candidate.exists() or allow_missing:
         return candidate
     return path_obj
+
+
 
 
 def _load_passages(dataset_name: str) -> List[str]:
@@ -787,6 +803,60 @@ def _build_module_messages(
     }
 
 
+def _prepare_module_explain_inputs(
+    module: dict,
+    id_to_module: dict,
+    main_num_to_anchor_title: dict,
+    request: MindmapExplainRequest,
+) -> dict:
+    anchor_title = _find_chapter_anchor_title(module, main_num_to_anchor_title=main_num_to_anchor_title)
+    module_type = _classify_module(anchor_title)
+    node_ref = module.get("_node_ref") or {}
+    subtree_nodes = _collect_subtree_nodes(node_ref) if isinstance(node_ref, dict) else []
+    subtree_ids = [str(n.get("id", "")) for n in subtree_nodes if n.get("id") is not None]
+
+    aggregated_passages: List[str] = []
+    seen = set()
+    for sid in subtree_ids:
+        m2 = id_to_module.get(sid)
+        if not m2:
+            continue
+        for p in m2.get("_context_clipped") or []:
+            if p in seen:
+                continue
+            seen.add(p)
+            aggregated_passages.append(p)
+
+    agg_context_text, agg_context_clipped = _truncate_passages(
+        aggregated_passages,
+        max_chars=request.context_max_chars,
+        per_passage_chars=request.context_per_passage_chars,
+    )
+    subtree_text = _build_subtree_text(node_ref, max_chars=request.context_max_chars)
+    combined_input = (
+        "【模块子树内容】\n"
+        f"{subtree_text}\n\n"
+        "【子树检索上下文】\n"
+        f"{agg_context_text}"
+    ).strip()
+
+    messages, prompt_meta = _build_module_messages(
+        module_title=module.get("title", ""),
+        module_path=module.get("path", ""),
+        module_type=module_type,
+        context_text=combined_input,
+        anchor_title=anchor_title,
+    )
+    return {
+        "messages": messages,
+        "prompt_meta": prompt_meta,
+        "module_type": module_type,
+        "anchor_title": anchor_title,
+        "subtree_node_count": len(subtree_nodes),
+        "context_clipped": agg_context_clipped,
+    }
+
+
 def _chunk_texts(texts: List[str], chunk_size: int, overlap: int) -> List[str]:
     if chunk_size <= 0:
         raise ValueError("chunk_size 必须大于 0")
@@ -1041,6 +1111,9 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
             }
         output_dir = _build_output_dir(dataset_name)
         setup_logging(os.path.join(output_dir, "log.txt"))
+        use_batch = request.use_batch
+        batch_completion_window = request.batch_completion_window
+        batch_poll_interval_s = request.batch_poll_interval_s
 
         embedding_model_path = _resolve_path(request.embedding_model, allow_missing=True)
         embedding_model = SentenceTransformer(str(embedding_model_path), device="cpu")
@@ -1094,45 +1167,13 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
         main_num_to_anchor_title = _build_main_num_to_anchor_title(modules)
 
         def _run_one(module: dict) -> dict:
-            anchor_title = _find_chapter_anchor_title(module, main_num_to_anchor_title=main_num_to_anchor_title)
-            module_type = _classify_module(anchor_title)
-            node_ref = module.get("_node_ref") or {}
-            subtree_nodes = _collect_subtree_nodes(node_ref) if isinstance(node_ref, dict) else []
-            subtree_ids = [str(n.get("id", "")) for n in subtree_nodes if n.get("id") is not None]
-
-            aggregated_passages: List[str] = []
-            seen = set()
-            for sid in subtree_ids:
-                m2 = id_to_module.get(sid)
-                if not m2:
-                    continue
-                for p in m2.get("_context_clipped") or []:
-                    if p in seen:
-                        continue
-                    seen.add(p)
-                    aggregated_passages.append(p)
-
-            agg_context_text, agg_context_clipped = _truncate_passages(
-                aggregated_passages,
-                max_chars=request.context_max_chars,
-                per_passage_chars=request.context_per_passage_chars,
+            prep = _prepare_module_explain_inputs(
+                module=module,
+                id_to_module=id_to_module,
+                main_num_to_anchor_title=main_num_to_anchor_title,
+                request=request,
             )
-            subtree_text = _build_subtree_text(node_ref, max_chars=request.context_max_chars)
-            combined_input = (
-                "【模块子树内容】\n"
-                f"{subtree_text}\n\n"
-                "【子树检索上下文】\n"
-                f"{agg_context_text}"
-            ).strip()
-
-            messages, prompt_meta = _build_module_messages(
-                module_title=module.get("title", ""),
-                module_path=module.get("path", ""),
-                module_type=module_type,
-                context_text=combined_input,
-                anchor_title=anchor_title,
-            )
-            response = rag.llm_model.generate(messages)
+            response = rag.llm_model.generate(prep["messages"])
             answer = response.content
 
             usage = response.usage or {}
@@ -1141,7 +1182,7 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
             total_tokens = usage.get("total_tokens")
             estimated = False
             if not isinstance(prompt_tokens, int) or not isinstance(completion_tokens, int):
-                prompt_tokens = estimate_message_tokens(messages)
+                prompt_tokens = estimate_message_tokens(prep["messages"])
                 completion_tokens = estimate_token_count(answer)
                 total_tokens = prompt_tokens + completion_tokens
                 estimated = True
@@ -1150,77 +1191,259 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
 
             return {
                 "llm_answer": answer,
-                "module_type": module_type,
-                "anchor_title": anchor_title,
-                "subtree_node_count": len(subtree_nodes),
-                "context_clipped": agg_context_clipped,
+                "module_type": prep["module_type"],
+                "anchor_title": prep["anchor_title"],
+                "subtree_node_count": prep["subtree_node_count"],
+                "context_clipped": prep["context_clipped"],
                 "token_input": int(prompt_tokens),
                 "token_output": int(completion_tokens),
                 "token_total": int(total_tokens),
                 "token_estimated": estimated,
-                **prompt_meta,
+                **prep["prompt_meta"],
             }
 
         results: List[dict] = []
         had_errors = False
-        with ThreadPoolExecutor(max_workers=request.module_max_workers) as executor:
-            future_to_module = {executor.submit(_run_one, m): m for m in modules}
-            for future in as_completed(future_to_module):
-                module = future_to_module[future]
+        if use_batch:
+            batch_input_path = os.path.join(output_dir, "mindmap_explain_batch_input.jsonl")
+            batch_output_path = os.path.join(output_dir, "mindmap_explain_batch_output.jsonl")
+            module_payloads: dict = {}
+            batch_lines: List[dict] = []
+            for idx, module in enumerate(modules):
+                prep = _prepare_module_explain_inputs(
+                    module=module,
+                    id_to_module=id_to_module,
+                    main_num_to_anchor_title=main_num_to_anchor_title,
+                    request=request,
+                )
+                custom_id = str(module.get("id", "")) if module.get("id") is not None else ""
+                if not custom_id:
+                    custom_id = f"idx-{idx}"
+                if custom_id in module_payloads:
+                    custom_id = f"{custom_id}-{idx}"
+                module_payloads[custom_id] = {
+                    "module": module,
+                    **prep,
+                }
+                batch_lines.append(
+                    {
+                        "custom_id": custom_id,
+                        "method": "POST",
+                        "url": "/v1/chat/completions",
+                        "body": {
+                            "model": request.llm_model,
+                            "messages": prep["messages"],
+                            "temperature": 0,
+                            "max_tokens": 2000,
+                        },
+                    }
+                )
+
+            with open(batch_input_path, "w", encoding="utf-8") as f_out:
+                for line in batch_lines:
+                    f_out.write(json.dumps(line, ensure_ascii=False))
+                    f_out.write("\n")
+
+            batch_timeout_s = get_default_timeout_s()
+            client, http_client = create_openai_client(timeout_s=batch_timeout_s)
+            output_bytes = b""
+            try:
+                with open(batch_input_path, "rb") as f_in:
+                    input_file = client.files.create(file=f_in, purpose="batch")
+                batch = client.batches.create(
+                    input_file_id=input_file.id,
+                    endpoint="/v1/chat/completions",
+                    completion_window=batch_completion_window,
+                )
+                while True:
+                    batch_status = client.batches.retrieve(batch.id)
+                    status = getattr(batch_status, "status", None)
+                    if status == "completed":
+                        output_file_id = batch_status.output_file_id
+                        output = client.files.content(output_file_id)
+                        output_bytes = output.read()
+                        break
+                    if status in {"failed", "expired", "cancelled"}:
+                        raise RuntimeError(f"Batch task {status}")
+                    time.sleep(batch_poll_interval_s)
+            finally:
+                http_client.close()
+
+            with open(batch_output_path, "wb") as f_out:
+                f_out.write(output_bytes)
+
+            output_text = output_bytes.decode("utf-8", errors="replace")
+            batch_outputs: dict = {}
+            for line in output_text.splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                custom_id = str(item.get("custom_id", ""))
+                if custom_id:
+                    batch_outputs[custom_id] = item
+
+            for custom_id, payload in module_payloads.items():
+                module = payload["module"]
                 result_item = {
                     "id": str(module.get("id", "")),
                     "title": str(module.get("title", "")),
                     "level": int(module.get("level") or 0),
                     "path": str(module.get("path", "")),
                 }
-                try:
-                    out = future.result()
-                    token_total_input += int(out.get("token_input") or 0)
-                    token_total_output += int(out.get("token_output") or 0)
-                    token_total += int(out.get("token_total") or 0)
-                    if out.get("token_estimated"):
-                        estimated_modules += 1
-
-                    logger.info(
-                        "mindmap_explain module_id=%s path=%s anchor=%s input_tokens=%s output_tokens=%s total_tokens=%s estimated=%s",
-                        result_item.get("id"),
-                        result_item.get("path"),
-                        out.get("anchor_title"),
-                        out.get("token_input"),
-                        out.get("token_output"),
-                        out.get("token_total"),
-                        out.get("token_estimated"),
-                    )
-                    result_item.update(
-                        {
-                            "prompt_id": out.get("prompt_id"),
-                            "prompt_version": out.get("prompt_version"),
-                            "module_type": out.get("module_type"),
-                            "anchor_title": out.get("anchor_title"),
-                            "subtree_node_count": out.get("subtree_node_count"),
-                            "llm_answer": out.get("llm_answer"),
-                        }
-                    )
-                    if request.include_context:
-                        result_item["context"] = out.get("context_clipped") or []
-                    if request.include_tree and module.get("_node_ref") is not None:
-                        node_ref = module["_node_ref"]
-                        node_ref["llm_answer"] = out.get("llm_answer")
-                        node_ref["module_type"] = out.get("module_type")
-                        node_ref["anchor_title"] = out.get("anchor_title")
-                        node_ref["subtree_node_count"] = out.get("subtree_node_count")
-                        node_ref["prompt_id"] = out.get("prompt_id")
-                        node_ref["prompt_version"] = out.get("prompt_version")
-                        if request.include_context:
-                            node_ref["context"] = result_item.get("context", [])
-                except Exception as e:
+                output_item = batch_outputs.get(custom_id)
+                if not output_item:
                     had_errors = True
-                    result_item["error"] = str(e)
+                    result_item["error"] = f"batch output missing for {custom_id}"
                     if request.include_context:
-                        result_item["context"] = module.get("_context_clipped", [])
+                        result_item["context"] = payload.get("context_clipped") or []
                     if request.include_tree and module.get("_node_ref") is not None:
-                        module["_node_ref"]["error"] = str(e)
+                        module["_node_ref"]["error"] = result_item["error"]
+                    results.append(result_item)
+                    continue
+
+                if output_item.get("error"):
+                    had_errors = True
+                    result_item["error"] = str(output_item.get("error"))
+                    if request.include_context:
+                        result_item["context"] = payload.get("context_clipped") or []
+                    if request.include_tree and module.get("_node_ref") is not None:
+                        module["_node_ref"]["error"] = result_item["error"]
+                    results.append(result_item)
+                    continue
+
+                response_obj = output_item.get("response") or {}
+                status_code = response_obj.get("status_code")
+                body = response_obj.get("body") or {}
+                if status_code is not None and int(status_code) != 200:
+                    had_errors = True
+                    result_item["error"] = f"batch status {status_code}"
+                    if request.include_context:
+                        result_item["context"] = payload.get("context_clipped") or []
+                    if request.include_tree and module.get("_node_ref") is not None:
+                        module["_node_ref"]["error"] = result_item["error"]
+                    results.append(result_item)
+                    continue
+
+                answer = ""
+                choices = body.get("choices") or []
+                if choices:
+                    message = choices[0].get("message") or {}
+                    answer = message.get("content") or ""
+
+                usage = body.get("usage") or {}
+                prompt_tokens = usage.get("prompt_tokens")
+                completion_tokens = usage.get("completion_tokens")
+                total_tokens = usage.get("total_tokens")
+                estimated = False
+                if not isinstance(prompt_tokens, int) or not isinstance(completion_tokens, int):
+                    prompt_tokens = estimate_message_tokens(payload.get("messages") or [])
+                    completion_tokens = estimate_token_count(answer)
+                    total_tokens = prompt_tokens + completion_tokens
+                    estimated = True
+                if not isinstance(total_tokens, int):
+                    total_tokens = int(prompt_tokens) + int(completion_tokens)
+
+                token_total_input += int(prompt_tokens)
+                token_total_output += int(completion_tokens)
+                token_total += int(total_tokens)
+                if estimated:
+                    estimated_modules += 1
+
+                logger.info(
+                    "mindmap_explain module_id=%s path=%s anchor=%s input_tokens=%s output_tokens=%s total_tokens=%s estimated=%s",
+                    result_item.get("id"),
+                    result_item.get("path"),
+                    payload.get("anchor_title"),
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    estimated,
+                )
+                result_item.update(
+                    {
+                        "prompt_id": payload.get("prompt_meta", {}).get("prompt_id"),
+                        "prompt_version": payload.get("prompt_meta", {}).get("prompt_version"),
+                        "module_type": payload.get("module_type"),
+                        "anchor_title": payload.get("anchor_title"),
+                        "subtree_node_count": payload.get("subtree_node_count"),
+                        "llm_answer": answer,
+                    }
+                )
+                if request.include_context:
+                    result_item["context"] = payload.get("context_clipped") or []
+                if request.include_tree and module.get("_node_ref") is not None:
+                    node_ref = module["_node_ref"]
+                    node_ref["llm_answer"] = answer
+                    node_ref["module_type"] = payload.get("module_type")
+                    node_ref["anchor_title"] = payload.get("anchor_title")
+                    node_ref["subtree_node_count"] = payload.get("subtree_node_count")
+                    node_ref["prompt_id"] = payload.get("prompt_meta", {}).get("prompt_id")
+                    node_ref["prompt_version"] = payload.get("prompt_meta", {}).get("prompt_version")
+                    if request.include_context:
+                        node_ref["context"] = result_item.get("context", [])
                 results.append(result_item)
+        else:
+            with ThreadPoolExecutor(max_workers=request.module_max_workers) as executor:
+                future_to_module = {executor.submit(_run_one, m): m for m in modules}
+                for future in as_completed(future_to_module):
+                    module = future_to_module[future]
+                    result_item = {
+                        "id": str(module.get("id", "")),
+                        "title": str(module.get("title", "")),
+                        "level": int(module.get("level") or 0),
+                        "path": str(module.get("path", "")),
+                    }
+                    try:
+                        out = future.result()
+                        token_total_input += int(out.get("token_input") or 0)
+                        token_total_output += int(out.get("token_output") or 0)
+                        token_total += int(out.get("token_total") or 0)
+                        if out.get("token_estimated"):
+                            estimated_modules += 1
+
+                        logger.info(
+                            "mindmap_explain module_id=%s path=%s anchor=%s input_tokens=%s output_tokens=%s total_tokens=%s estimated=%s",
+                            result_item.get("id"),
+                            result_item.get("path"),
+                            out.get("anchor_title"),
+                            out.get("token_input"),
+                            out.get("token_output"),
+                            out.get("token_total"),
+                            out.get("token_estimated"),
+                        )
+                        result_item.update(
+                            {
+                                "prompt_id": out.get("prompt_id"),
+                                "prompt_version": out.get("prompt_version"),
+                                "module_type": out.get("module_type"),
+                                "anchor_title": out.get("anchor_title"),
+                                "subtree_node_count": out.get("subtree_node_count"),
+                                "llm_answer": out.get("llm_answer"),
+                            }
+                        )
+                        if request.include_context:
+                            result_item["context"] = out.get("context_clipped") or []
+                        if request.include_tree and module.get("_node_ref") is not None:
+                            node_ref = module["_node_ref"]
+                            node_ref["llm_answer"] = out.get("llm_answer")
+                            node_ref["module_type"] = out.get("module_type")
+                            node_ref["anchor_title"] = out.get("anchor_title")
+                            node_ref["subtree_node_count"] = out.get("subtree_node_count")
+                            node_ref["prompt_id"] = out.get("prompt_id")
+                            node_ref["prompt_version"] = out.get("prompt_version")
+                            if request.include_context:
+                                node_ref["context"] = result_item.get("context", [])
+                    except Exception as e:
+                        had_errors = True
+                        result_item["error"] = str(e)
+                        if request.include_context:
+                            result_item["context"] = module.get("_context_clipped", [])
+                        if request.include_tree and module.get("_node_ref") is not None:
+                            module["_node_ref"]["error"] = str(e)
+                    results.append(result_item)
 
         logger.info(
             "mindmap_explain_total modules=%s input_tokens=%s output_tokens=%s total_tokens=%s estimated_modules=%s",

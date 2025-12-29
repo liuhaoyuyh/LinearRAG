@@ -74,6 +74,21 @@ def _get_env_float(name: str, default: float) -> float:
     return float(raw)
 
 
+def get_default_timeout_s() -> float:
+    return _get_env_float("LLM_TIMEOUT_S", 60.0)
+
+
+def create_openai_client(timeout_s: Optional[float] = None) -> tuple[OpenAI, httpx.Client]:
+    resolved_timeout_s = timeout_s if timeout_s is not None else get_default_timeout_s()
+    http_client = httpx.Client(timeout=resolved_timeout_s, trust_env=False)
+    client = OpenAI(
+        api_key=_get_env_str("OPENAI_API_KEY"),
+        base_url=_get_env_str("OPENAI_BASE_URL"),
+        http_client=http_client,
+    )
+    return client, http_client
+
+
 def _exc_status_code(exc: BaseException) -> Optional[int]:
     status_code = getattr(exc, "status_code", None)
     if isinstance(status_code, int):

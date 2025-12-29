@@ -155,6 +155,27 @@ curl -X POST http://localhost:8000/mindmap/explain \
   }'
 ```
 
+批量推理（OpenAI-compatible Batch）示例：
+
+```bash
+curl -X POST http://localhost:8000/mindmap/explain \
+  -H "Content-Type: application/json" \
+  -d '{
+    "doc_name": "sustainability-16-02641-v2",
+    "use_batch": true,
+    "batch_completion_window": "24h",
+    "batch_poll_interval_s": 10,
+    "retrieval_top_k": 5,
+    "include_tree": true,
+    "include_context": true
+  }'
+```
+
+说明：
+- `use_batch` 默认 `false`，需要显式在请求体中开启。
+- `batch_completion_window` 默认为 `24h`，可按 OpenAI Batch 要求调整。
+- `batch_poll_interval_s` 为轮询间隔秒数，默认 10。
+
 #### content_list 转 chunk
 
 将 MinerU 的 `_content_list.json` 转为标准分块文件 `data/<doc_name>/chunk.json`。

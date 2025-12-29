@@ -6,6 +6,10 @@
 
 此环境仅为linearrag环境，mineru环境需要另装
 
+mineru服务启动命令
+```bash
+mineru-api --host 0.0.0.0 --port 8888
+```
 python=3.9
 
 ```bash

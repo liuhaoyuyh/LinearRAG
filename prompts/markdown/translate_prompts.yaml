@@ -1,0 +1,13 @@
+# User Prompt（用户级提示词）
+id: markdown_translate.user
+version: "1.0.0"
+description: Translate a Markdown fragment to Simplified Chinese while preserving structure.
+template: |
+  请将以下 Markdown 片段翻译为简体中文，严格保持结构与顺序不变：
+  - 不翻译代码块或行内代码
+  - 不改变占位符（如 <<LATEX_1>>、<<CODE_1>>、<<URL_1>>）
+  - HTML 表格只翻译单元格文本，不改变标签与属性
+  - 专业术语缩写保持原样
+
+  Markdown 片段：
+  {{ content }}

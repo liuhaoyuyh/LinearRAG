@@ -8,7 +8,7 @@
 
 mineru服务启动命令
 ```bash
-mineru-api --host 0.0.0.0 --port 8888
+mineru-api --host 127.0.0.1 --port 8888
 ```
 python=3.9
 

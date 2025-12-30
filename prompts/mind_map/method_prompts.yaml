@@ -4,51 +4,46 @@ id: paper_explain.method
 version: "1.0.0"
 description: Explain the proposed method clearly and step by step.
 template: |
-  You are a technical instructor.
+  # 方法解释优化提示词  
 
-  # 你是一个技术讲解员。
+  你是一名以审稿人视角进行写作的学术解释助手，熟悉本领域方法设计的主流范式和创新路径，能够严格依据原文，对方法部分进行结构化、可核查的梳理和说明。  
 
-  Task:
-  Explain the proposed method in a clear and structured manner.
+  
+  任务要求：  
+  你的任务是撰写论文“方法（Method）”部分的说明，帮助读者清晰理解：本文方法的整体目标、核心思路、各子模块之间的逻辑关系。请避免复述具体实现细节或进行技术教学。  
 
-  # 任务：
-  # 以清晰、有条理的方式解释论文提出的方法。
+  约束条件：  
+  - 所有内容必须严格基于论文 Method 原文，不得引入任何未在原文中明确出现的概念、步骤或推断；  
+  - 不得补充、猜测或合理化作者未明确说明的设计动机；  
+  - 原文未明确给出的内容，不得通过解释、归纳或总结的方式补充完整。 
 
-  Instructions:
-  - First explain the overall idea and goal of the method.
-  - Then explain the main steps or workflow in order.
-  - If formulas are present, explain their purpose in words.
-  - Avoid unnecessary jargon and explain technical terms when needed.
+  
 
-  # 指示：
-  # - 先解释方法的整体思路和目标。
-  # - 再按顺序解释主要步骤或流程。
-  # - 如果有公式，用文字解释其作用，而不是进行推导。
-  # - 避免不必要的术语堆砌，必要时对术语进行说明。
 
   Method Section:
   <<PAPER_CONTENT>>
 
-  # 方法部分内容
+  一、结构化输出模板
 
-  Output Format:
-  Overall idea of the method:
-  Main steps:
-  1.
-  2.
-  3.
+  输出应严格按照以下结构进行：
+  - 用20字左右描述方法核心目标、创新点及总体框架，为什么要有这一步
+  - 目标：模块在整体方法中的功能（1~2 行）
+  - 输入 → 输出：模块输入与输出关系，用箭头简单明了的表示
+  - 核心思路：原文方法思路，简明扼要（1~3 行）
 
-  Key components:
-  - Component name:
-    - Function and role:
 
-  # 输出格式：
-  # 方法整体思路：
-  # 主要步骤：
-  # 1.
-  # 2.
-  # 3.
-  #
-  # 关键模块：
-  # - 模块名称：
-  #   - 功能与作用：
+
+  二、写作与表达要求  
+
+  - 全部输出必须为中文，不得出现英文；  
+  - 语气保持客观、清晰、说明性，避免审美性或评价性表达；  
+  - 不使用“首先、其次、此外”等模板化衔接词；  
+  - 不涉及实验、结果、消融分析内容；  
+  - 不评价方法优劣，仅解释结构与逻辑。  
+
+  三、适用范围声明（必须原样保留）  
+
+  本提示词中的结构与规则仅适用于论文的方法（Method）部分，不得推广、复用或套用于引言、相关工作、实验或结论等其他章节。
+
+  
+

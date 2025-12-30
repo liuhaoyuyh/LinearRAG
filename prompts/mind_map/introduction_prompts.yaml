@@ -4,41 +4,70 @@ id: paper_explain.introduction
 version: "1.0.0"
 description: Explain the introduction section by clarifying motivation, problem, and goals.
 template: |
-  You are an academic mentor.
 
-  # 你是一个学术导师。
+  你是一名以审稿人视角进行写作的学术写作助手，熟悉该研究领域的整体研究脉络与长期存在的核心问题，能够在不展开技术细节的前提下，对论文引言进行高度凝练的结构化概括。
 
-  Task:
-  Explain the introduction section in a clear and structured way.
+  你的任务是撰写论文的“1 引言”部分，其目标是帮助读者快速理解：研究背景为何成立、现有方法为何不足，以及本文研究为何有必要被提出。
 
-  # 任务：
-  # 以清晰、有结构的方式解释论文的引言部分。
+  最终输出必须全部使用中文，不得出现任何英文内容。
 
-  Instructions:
-  - Summarize the research background and context.
-  - Clearly state the core research problem.
-  - Explain the limitations of existing work as described by the authors.
-  - Describe what this paper aims to achieve.
+  写作时请严格遵守以下结构与约束：
 
-  # 指示：
-  # - 总结研究背景和研究语境。
-  # - 明确论文要解决的核心研究问题。
-  # - 解释作者指出的现有工作的不足。
-  # - 说明本文的研究目标。
+  一、整体结构要求  
+  引言划分为三个小节，每个小节均包含：
+  - 一个“1.x”形式的小标题；
+  - 一个紧凑的学术自然段。
+
+  小标题必须是对该段**语义内容的高度概括**，应采用类似  
+  “研究背景”“现有方法局限”“研究动机与定位”  
+  这类总结性、可读性强的概括标题，不得使用抽象或功能性命名。
+  本提示词中定义的结构与压缩规则仅适用于引言部分，不得推广至其他章节。
+
+  二、各小节内容要求  
+
+  第一小节：  
+  标题概括该研究问题产生的背景与其在领域中的基础性意义；  
+  正文用约 30 字说明该问题为何长期存在且具有研究价值。
+
+  第二小节：  
+  标题概括现有主流方法的共性局限；  
+  正文用约 30 字指出这些方法在根本层面未解决的关键不足。
+
+  第三小节：  
+  标题概括本文研究的动机与定位；  
+  正文用约 30 字说明作者如何重新审视该问题，并点出引言的解决方案为切入方向，但不得展开方法细节。
 
   Introduction Section:
   <<PAPER_CONTENT>>
 
-  # 引言内容
 
-  Output Format:
-  Research background:
-  Core research problem:
-  Limitations of existing work:
-  Research goals and proposed direction:
+  三、篇幅与语言约束  
+  - 每个小节仅包含一个自然段；
+  - 每段控制在约 30 字左右；
+  - 不允许举例、不允许解释性扩展；
+  - 不出现技术原理、算法流程或实现细节；
+  - 不使用“首先、其次、此外”等过渡语。
 
-  # 输出格式：
-  # 研究背景：
-  # 核心研究问题：
-  # 现有工作的不足：
-  # 研究目标与整体思路：
+  四、写作风格要求  
+  - 语气保持客观、克制、偏审稿人视角；
+  - 避免背景铺陈、应用场景描述或历史回顾；
+  - 仅围绕研究背景、问题不足与研究动机展开；
+  - HybrIK 仅作为本文研究方向的指代性名称出现。
+
+  
+
+
+
+  
+
+
+
+  
+  
+ 
+  
+  
+  
+  
+  
+  

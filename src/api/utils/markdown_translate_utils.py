@@ -61,6 +61,36 @@ def split_code_fences(text: str) -> List[Tuple[str, str]]:
     return blocks
 
 
+REFERENCE_HEADING_RE = re.compile(
+    r"^(#{1,6})\s*(参考文献|references|refenence)(\b|\s|$|[:：])",
+    re.IGNORECASE,
+)
+
+
+def split_references_section(text: str) -> Tuple[str, str]:
+    """拆分参考文献段落及其后的内容（仅匹配标题行）。"""
+    lines = text.splitlines(keepends=True)
+    in_code = False
+    fence = ""
+
+    for idx, line in enumerate(lines):
+        stripped = line.lstrip()
+        if not in_code and (stripped.startswith("```") or stripped.startswith("~~~")):
+            in_code = True
+            fence = stripped[:3]
+            continue
+        if in_code:
+            if stripped.startswith(fence):
+                in_code = False
+                fence = ""
+            continue
+
+        if REFERENCE_HEADING_RE.match(stripped):
+            return "".join(lines[:idx]), "".join(lines[idx:])
+
+    return text, ""
+
+
 def protect_text(text: str) -> Tuple[str, List[PlaceholderStore]]:
     """对公式、行内代码与链接 URL 进行占位保护。"""
     code_store = PlaceholderStore(prefix="CODE", items=[])
@@ -208,7 +238,8 @@ def translate_text_chunks(chunks: List[str], llm_model, max_workers: int) -> Lis
 
 def translate_markdown_text(markdown_text: str, llm_model, max_workers: int, chunk_max_chars: int) -> str:
     """翻译 Markdown 文本，保留结构并保护代码/公式。"""
-    blocks = split_code_fences(markdown_text)
+    translatable_text, tail_text = split_references_section(markdown_text)
+    blocks = split_code_fences(translatable_text)
     translated_blocks: List[str] = []
 
     for kind, block_text in blocks:
@@ -252,4 +283,4 @@ def translate_markdown_text(markdown_text: str, llm_model, max_workers: int, chu
         translated_block = "".join(translated_parts)
         translated_blocks.append(restore_text(translated_block, stores))
 
-    return "".join(translated_blocks)
+    return "".join(translated_blocks) + tail_text

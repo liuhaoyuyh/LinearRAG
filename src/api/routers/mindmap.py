@@ -577,7 +577,10 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
         if request.include_tree and isinstance(root, dict):
             translate_mindmap_titles_in_place(root, rag.llm_model, max_workers=request.module_max_workers)
             explain_md = mindmap_root_to_explain_markdown(root)
-            explain_md_path = os.path.join(output_dir, "mindmap_explain.md")
+            md_path_obj = Path(md_path)
+            explain_md_path = str(
+                md_path_obj.with_name(f"{md_path_obj.stem}_mindmap_explain{md_path_obj.suffix or '.md'}")
+            )
             with open(explain_md_path, "w", encoding="utf-8") as f_md_out:
                 f_md_out.write(explain_md)
 

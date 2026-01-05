@@ -105,6 +105,26 @@ def find_latest_markdown_path(doc_name: str) -> Path:
     return md_path
 
 
+def find_latest_translated_markdown(doc_name: str) -> Path:
+    """获取最新翻译 Markdown 路径（_translate.md）。"""
+    mineru_root = BASE_DIR / "output" / "mineru"
+    doc_dir = mineru_root / doc_name
+    if not doc_dir.exists():
+        raise HTTPException(status_code=404, detail=f"未在 {mineru_root} 下找到文档目录: {doc_name}")
+    timestamp_dirs = sorted([p for p in doc_dir.iterdir() if p.is_dir()], key=lambda p: p.name)
+    if not timestamp_dirs:
+        raise HTTPException(status_code=404, detail=f"文档 {doc_name} 下未找到时间戳目录")
+    latest_dir = timestamp_dirs[-1]
+    md_path = latest_dir / doc_name / f"{doc_name}_translate.md"
+    if not md_path.exists():
+        candidates = list(latest_dir.rglob(f"{doc_name}_translate.md"))
+        if candidates:
+            md_path = candidates[0]
+        else:
+            raise HTTPException(status_code=404, detail=f"在 {latest_dir} 下未找到 {doc_name}_translate.md")
+    return md_path
+
+
 def safe_filename(name: str) -> str:
     """将文件名收敛到安全的路径片段。"""
     return Path(name).name

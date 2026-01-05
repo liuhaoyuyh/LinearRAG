@@ -16,6 +16,8 @@ from src.api.schemas import (
     MarkdownChunkRequest,
     MarkdownTranslateRequest,
     MarkdownTranslateResponse,
+    MarkdownTranslateWithImageRequest,
+    MarkdownTranslateWithImageResponse,
     MindmapExplainRequest,
     MindmapExplainResponse,
     MindmapRequest,
@@ -32,11 +34,13 @@ from src.api.utils.mindmap_utils import (
     truncate_passages,
 )
 from src.api.utils.markdown_translate_utils import translate_markdown_text
+from src.api.utils.markdown_image_translate_utils import translate_markdown_images
 from src.api.utils.path_utils import (
     build_output_dir,
     find_latest_content_list,
     find_latest_markdown,
     find_latest_markdown_path,
+    find_latest_translated_markdown,
     resolve_path,
 )
 from src.api.utils.rag_utils import (
@@ -169,6 +173,41 @@ def translate_markdown(request: MarkdownTranslateRequest):
     except HTTPException as exc:
         if exc.status_code == 404:
             raise HTTPException(status_code=404, detail="未找到 MinerU Markdown，请先完成 MinerU 解析。")
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/markdown/translate_with_image", response_model=MarkdownTranslateWithImageResponse)
+def translate_markdown_with_image(request: MarkdownTranslateWithImageRequest):
+    """翻译 Markdown 图片文本并替换图片链接。"""
+    try:
+        md_path = find_latest_translated_markdown(request.doc_name)
+        with open(md_path, "r", encoding="utf-8") as f_md:
+            md_text = f_md.read()
+
+        llm_model = LLM_Model(request.llm_model)
+        translated_md, output_images = translate_markdown_images(
+            md_text,
+            md_path=md_path,
+            llm_model=llm_model,
+            ocr_model=request.ocr_model,
+        )
+
+        output_path = md_path.with_name(f"{md_path.stem}_translate_with_image{md_path.suffix}")
+        with open(output_path, "w", encoding="utf-8") as f_out:
+            f_out.write(translated_md)
+
+        return {
+            "status": "success",
+            "doc_name": request.doc_name,
+            "markdown_path": str(md_path),
+            "translated_path": str(output_path),
+            "image_count": len(output_images),
+        }
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            raise HTTPException(status_code=404, detail="未找到翻译后的 Markdown，请先完成 Markdown 翻译。")
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -1,0 +1,14 @@
+# User Prompt（用户级提示词）
+id: markdown_ocr.user
+version: "1.0.0"
+description: OCR prompt for extracting text blocks and bounding boxes.
+template: |
+  You are a precise OCR engine. Extract readable text and return exact bounding boxes.
+
+  # 你是精确的 OCR 引擎，必须提取可读文字并返回文本框坐标。
+
+  Rules:
+  - Return ONLY valid JSON.
+  - Coordinates are pixel integers in the original image.
+  - Use bbox format [x1, y1, x2, y2] with top-left origin.
+  - Ignore decorative lines, icons, and non-text elements.

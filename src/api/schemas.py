@@ -84,6 +84,20 @@ class MarkdownTranslateResponse(BaseModel):
     translated_path: str
 
 
+class MarkdownTranslateWithImageRequest(BaseModel):
+    doc_name: str = Field(..., description="文档名（对应 output/mineru/<name>/ 下目录名，读取 <name>_translate.md）")
+    llm_model: str = Field("qwen3-vl-flash", description="OpenAI ChatCompletions 模型名称")
+    ocr_model: str = Field("qwen-vl-ocr", description="OCR 模型名称")
+
+
+class MarkdownTranslateWithImageResponse(BaseModel):
+    status: str
+    doc_name: str
+    markdown_path: str
+    translated_path: str
+    image_count: int
+
+
 class MindmapExplainRequest(BaseModel):
     doc_name: str = Field(..., description="文档名（对应 output/mineru/<name>/ 下目录名）")
     dataset_name: Optional[str] = Field(

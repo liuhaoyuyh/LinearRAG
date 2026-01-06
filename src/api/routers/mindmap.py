@@ -204,6 +204,22 @@ def translate_markdown(request: MarkdownTranslateRequest):
                 parts.append(content)
             return "".join(parts), store
 
+        def _build_ref_text_content(block: dict) -> str:
+            lines = []
+            for line in _iter_lines(block):
+                parts = []
+                for span in line.get("spans") or []:
+                    content = span.get("content")
+                    if content is None:
+                        continue
+                    parts.append(content)
+                if parts:
+                    lines.append("".join(parts).strip())
+            cleaned = [line for line in lines if line]
+            if not cleaned:
+                return ""
+            return "  \n".join(cleaned) + "  "
+
         def _extract_table_html(block: dict) -> str:
             for span in _iter_spans(block):
                 html = span.get("html")
@@ -230,9 +246,19 @@ def translate_markdown(request: MarkdownTranslateRequest):
             for block in page.get("para_blocks") or []:
                 if not in_references and _is_reference_heading(block):
                     in_references = True
-                block_text, store = _build_block_text(block)
+                has_ref_text = any(
+                    (sub_block or {}).get("type") == "ref_text"
+                    for sub_block in (block.get("blocks") or [])
+                )
+                block_type = block.get("type")
+                if block_type == "ref_text":
+                    block_text = _build_ref_text_content(block)
+                    store = PlaceholderStore(prefix="FORMULA", items=[])
+                else:
+                    block_text, store = _build_block_text(block)
                 table_html = _extract_table_html(block) if block.get("type") == "table" else ""
-                blocks_to_translate.append((block, block_text, store, table_html, in_references))
+                skip_translate = in_references or has_ref_text or block.get("type") == "ref_text"
+                blocks_to_translate.append((block, block_text, store, table_html, skip_translate))
 
         llm_model = LLM_Model(request.llm_model)
 
@@ -310,9 +336,17 @@ def translate_markdown(request: MarkdownTranslateRequest):
             for block in page.get("para_blocks") or []:
                 block_type = block.get("type")
                 translate_content = block.get("translate_content") or ""
+                has_ref_text = any(
+                    (sub_block or {}).get("type") == "ref_text"
+                    for sub_block in (block.get("blocks") or [])
+                )
                 if block_type == "title":
                     if translate_content.strip():
                         markdown_blocks.append(translate_content.strip())
+                elif block_type == "ref_text":
+                    ref_text = _build_ref_text_content(block)
+                    if ref_text.strip():
+                        markdown_blocks.append(ref_text.strip())
                 elif block_type == "text":
                     if translate_content.strip():
                         markdown_blocks.append(translate_content.strip())
@@ -330,6 +364,10 @@ def translate_markdown(request: MarkdownTranslateRequest):
                 elif block_type in ("equation", "interline_equation"):
                     if translate_content.strip():
                         markdown_blocks.append(f"$${translate_content.strip()}$$")
+                elif has_ref_text:
+                    ref_text = _build_ref_text_content(block)
+                    if ref_text.strip():
+                        markdown_blocks.append(ref_text.strip())
         markdown_text = "\n\n".join(markdown_blocks)
 
         base_stem = middle_path.stem[:-7] if middle_path.stem.endswith("_middle") else middle_path.stem

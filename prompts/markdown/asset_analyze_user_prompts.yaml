@@ -1,0 +1,19 @@
+# User Prompt（用户级提示词）
+id: markdown_asset_analyze.user
+version: "1.0.0"
+description: User prompt for analyzing Markdown assets with context.
+template: |
+  Task: Analyze the Markdown asset using both local context and retrieved passages.
+
+  Query (from asset title): {{ query }}
+
+  Asset Markdown:
+  {{ asset_markdown }}
+
+  Local Markdown Context:
+  {{ local_context }}
+
+  Retrieved Context:
+  {{ retrieval_context }}
+
+  Output a concise analysis focused on what the asset shows and how it relates to the context.

@@ -117,6 +117,26 @@ curl -X POST http://localhost:8000/mineru/parse \
     "return_md": true,
     "return_images": true
   }'
+  
+  
+  
+{
+  "file_path": "./data/2021年点云姿态估计.pdf",
+  "output_dir": "output",
+  "backend": "vlm-mlx-engine",
+  "parse_method": "auto",
+  "formula_enable": true,
+  "table_enable": true,
+  "server_url": "127.0.0.1:8888",
+  "return_md": true,
+  "return_middle_json": true,
+  "return_model_output": true,
+  "return_content_list": true,
+  "return_images": true,
+  "response_format_zip": true,
+  "start_page_id": 0,
+  "end_page_id": 99999
+}
 ```
 
 返回将包含 MinerU 调用状态及落盘路径。默认输出目录 `results/mineru/<文件名>/<timestamp>/`，可通过请求体 `output_dir` 覆盖。
@@ -207,3 +227,37 @@ curl -X POST http://localhost:8000/markdown/chunk \
 ```
 
 服务会在 `output/mineru/<doc_name>/` 下选取时间戳目录名最大的目录，读取 `<doc_name>/<doc_name>.md`，按配置的 `chunk_token_size` 与 `chunk_overlap_token_size` 空格分词生成分块。
+
+#### Markdown 资产分析（图片/表格/公式）
+
+分析 Markdown 中的图片/表格/公式（表格与公式以图片链接形式提供），结合本地上下文与检索结果生成说明。
+
+```bash
+curl -X POST http://localhost:8000/markdown/asset/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "doc_name": "2021年点云姿态估计",
+    "asset_markdown": "![](images/xxx.png)"
+  }'
+```
+
+参数说明（完整字段，可按需覆盖）：
+- `doc_name`：文档名，对应 `output/mineru/<doc_name>/`
+- `dataset_name`：可选，检索/索引用的数据集名；默认等于 `doc_name`（`dataset/<name>/`）
+- `asset_markdown`：Markdown 图片语句（表格/公式以图片链接形式提供）
+- `llm_model`：分析/回答的 LLM 模型名
+- `embedding_model`：向量模型名或路径（SentenceTransformer）
+- `spacy_model`：spaCy 模型名
+- `working_dir`：索引输出目录
+- `batch_size`：索引/处理批大小
+- `max_workers`：并发数（检索/索引等）
+- `retrieval_top_k`：检索返回的 top-k 段落数
+- `max_iterations`：LinearRAG 迭代次数上限
+- `top_k_sentence`：每段 passage 选取的句子数
+- `passage_ratio`：段落扩展比率
+- `passage_node_weight`：图中 passage 节点权重
+- `damping`：迭代阻尼（0-1）
+- `iteration_threshold`：迭代停止阈值
+- `context_max_chars`：拼接后的上下文最大字符数
+- `context_per_passage_chars`：每段 passage 的截断字符数
+- `local_context_window_chars`：Markdown 本地上下文窗口字符数

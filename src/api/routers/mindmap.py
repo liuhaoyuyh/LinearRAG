@@ -1,6 +1,7 @@
 import json
 import os
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List
@@ -18,9 +19,19 @@ from src.api.schemas import (
     MarkdownTranslateResponse,
     MarkdownTranslateWithImageRequest,
     MarkdownTranslateWithImageResponse,
+    MarkdownAssetAnalyzeRequest,
+    MarkdownAssetAnalyzeResponse,
     MindmapExplainRequest,
     MindmapExplainResponse,
     MindmapRequest,
+)
+from src.api.utils.markdown_asset_analyze_utils import (
+    build_asset_messages,
+    build_asset_query,
+    extract_local_context,
+    load_image_data_url,
+    parse_markdown_image,
+    resolve_asset_image,
 )
 from src.api.utils.mindmap_utils import (
     build_main_num_to_anchor_title,
@@ -33,13 +44,20 @@ from src.api.utils.mindmap_utils import (
     translate_mindmap_titles_in_place,
     truncate_passages,
 )
-from src.api.utils.markdown_translate_utils import translate_markdown_text
+from src.api.utils.markdown_translate_utils import (
+    PlaceholderStore,
+    REFERENCE_HEADING_RE,
+    translate_html_table,
+    translate_markdown_text,
+    translate_text,
+)
 from src.api.utils.markdown_image_translate_utils import translate_markdown_images
 from src.api.utils.path_utils import (
     build_output_dir,
     find_latest_content_list,
     find_latest_markdown,
     find_latest_markdown_path,
+    find_latest_middle_json,
     find_latest_translated_markdown,
     resolve_path,
 )
@@ -146,33 +164,189 @@ def generate_markdown_chunks(request: MarkdownChunkRequest):
 
 @router.post("/markdown/translate", response_model=MarkdownTranslateResponse)
 def translate_markdown(request: MarkdownTranslateRequest):
-    """翻译 MinerU Markdown 并写入同目录。"""
+    """翻译 MinerU middle.json 并写入同目录。"""
     try:
-        md_path = find_latest_markdown(request.doc_name)
-        with open(md_path, "r", encoding="utf-8") as f_md:
-            md_text = f_md.read()
+        middle_path = find_latest_middle_json(request.doc_name)
+        with open(middle_path, "r", encoding="utf-8") as f_json:
+            middle_data = json.load(f_json)
+
+        pdf_info = middle_data.get("pdf_info") or []
+        blocks_to_translate = []
+
+        def _iter_lines(block: dict):
+            for line in block.get("lines") or []:
+                yield line
+            for sub_block in block.get("blocks") or []:
+                for line in sub_block.get("lines") or []:
+                    yield line
+
+        def _iter_spans(block: dict):
+            for line in _iter_lines(block):
+                for span in line.get("spans") or []:
+                    yield span
+
+        def _build_block_text(block: dict) -> tuple[str, PlaceholderStore]:
+            store = PlaceholderStore(prefix="FORMULA", items=[])
+            parts = []
+            block_type = block.get("type")
+            for span in _iter_spans(block):
+                content = span.get("content")
+                if content is None:
+                    continue
+                span_type = span.get("type")
+                if span_type == "inline_equation":
+                    content = store.add(f"${content}$")
+                elif span_type in ("equation", "interline_equation"):
+                    if block_type not in ("equation", "interline_equation"):
+                        content = store.add(f"${content}$")
+                    else:
+                        content = store.add(content)
+                parts.append(content)
+            return "".join(parts), store
+
+        def _extract_table_html(block: dict) -> str:
+            for span in _iter_spans(block):
+                html = span.get("html")
+                if html:
+                    return html
+            return ""
+
+        in_references = False
+
+        def _is_reference_heading(block: dict) -> bool:
+            parts = []
+            for span in _iter_spans(block):
+                if span.get("type") != "text":
+                    continue
+                content = span.get("content")
+                if content:
+                    parts.append(content)
+            text = "".join(parts).strip()
+            if not text:
+                return False
+            return REFERENCE_HEADING_RE.match(text) is not None
+
+        for page in pdf_info:
+            for block in page.get("para_blocks") or []:
+                if not in_references and _is_reference_heading(block):
+                    in_references = True
+                block_text, store = _build_block_text(block)
+                table_html = _extract_table_html(block) if block.get("type") == "table" else ""
+                blocks_to_translate.append((block, block_text, store, table_html, in_references))
 
         llm_model = LLM_Model(request.llm_model)
-        translated = translate_markdown_text(
-            md_text,
-            llm_model=llm_model,
-            max_workers=request.max_workers,
-            chunk_max_chars=request.chunk_max_chars,
-        )
 
-        output_path = md_path.with_name(f"{md_path.stem}_translate{md_path.suffix}")
+        def _translate_block(
+            block_type: str,
+            text: str,
+            store: PlaceholderStore,
+            table_html: str,
+            skip_translate: bool,
+        ) -> str:
+            if skip_translate:
+                original_text = store.restore(text) if store.items else text
+                if block_type == "table" and table_html:
+                    if not original_text.strip():
+                        return table_html
+                    return f"{table_html}\n\n{original_text.strip()}"
+                return original_text
+            if block_type == "table" and table_html:
+                translated_table = translate_html_table(table_html, lambda t: translate_text(t, llm_model))
+                if not text.strip():
+                    return translated_table
+                translated_caption = translate_markdown_text(
+                    text,
+                    llm_model=llm_model,
+                    max_workers=1,
+                    chunk_max_chars=request.chunk_max_chars,
+                )
+                translated_caption = store.restore(translated_caption) if store.items else translated_caption
+                return f"{translated_table}\n\n{translated_caption.strip()}"
+            if not text.strip():
+                return text
+            if block_type in ("equation", "interline_equation"):
+                return store.restore(text) if store.items else text
+            translated = translate_markdown_text(
+                text,
+                llm_model=llm_model,
+                max_workers=1,
+                chunk_max_chars=request.chunk_max_chars,
+            )
+            return store.restore(translated) if store.items else translated
+
+        translated_results = [None] * len(blocks_to_translate)
+        with ThreadPoolExecutor(max_workers=request.max_workers) as executor:
+            future_to_idx = {
+                executor.submit(
+                    _translate_block,
+                    block.get("type"),
+                    text,
+                    store,
+                    table_html,
+                    skip_translate,
+                ): idx
+                for idx, (block, text, store, table_html, skip_translate) in enumerate(blocks_to_translate)
+            }
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                translated_results[idx] = future.result()
+
+        title_count = 0
+        for (block, _, _, _, _), translated in zip(blocks_to_translate, translated_results):
+            if block.get("type") == "title":
+                heading = "#" if title_count == 0 else "##"
+                title_count += 1
+                content = translated.strip()
+                block["translate_content"] = f"{heading} {content}" if content else translated
+            else:
+                block["translate_content"] = translated
+
+        middle_translate_path = middle_path.with_name(f"{middle_path.stem}_translate{middle_path.suffix}")
+        with open(middle_translate_path, "w", encoding="utf-8") as f_out:
+            json.dump(middle_data, f_out, ensure_ascii=False, indent=2)
+
+        markdown_blocks = []
+        for page in pdf_info:
+            for block in page.get("para_blocks") or []:
+                block_type = block.get("type")
+                translate_content = block.get("translate_content") or ""
+                if block_type == "title":
+                    if translate_content.strip():
+                        markdown_blocks.append(translate_content.strip())
+                elif block_type == "text":
+                    if translate_content.strip():
+                        markdown_blocks.append(translate_content.strip())
+                elif block_type == "image":
+                    image_path = None
+                    for span in _iter_spans(block):
+                        image_path = span.get("image_path")
+                        if image_path:
+                            break
+                    if image_path:
+                        markdown_blocks.append(f"![](images/{image_path})")
+                elif block_type == "table":
+                    if translate_content.strip():
+                        markdown_blocks.append(translate_content.strip())
+                elif block_type in ("equation", "interline_equation"):
+                    if translate_content.strip():
+                        markdown_blocks.append(f"$${translate_content.strip()}$$")
+        markdown_text = "\n\n".join(markdown_blocks)
+
+        base_stem = middle_path.stem[:-7] if middle_path.stem.endswith("_middle") else middle_path.stem
+        output_path = middle_path.with_name(f"{base_stem}_translate.md")
         with open(output_path, "w", encoding="utf-8") as f_out:
-            f_out.write(translated)
+            f_out.write(markdown_text)
 
         return {
             "status": "success",
             "doc_name": request.doc_name,
-            "markdown_path": str(md_path),
+            "markdown_path": str(middle_path),
             "translated_path": str(output_path),
+            "middle_translate_path": str(middle_translate_path),
         }
     except HTTPException as exc:
         if exc.status_code == 404:
-            raise HTTPException(status_code=404, detail="未找到 MinerU Markdown，请先完成 MinerU 解析。")
+            raise HTTPException(status_code=404, detail="未找到 MinerU middle.json，请先完成 MinerU 解析。")
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -208,6 +382,113 @@ def translate_markdown_with_image(request: MarkdownTranslateWithImageRequest):
     except HTTPException as exc:
         if exc.status_code == 404:
             raise HTTPException(status_code=404, detail="未找到翻译后的 Markdown，请先完成 Markdown 翻译。")
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/markdown/asset/analyze", response_model=MarkdownAssetAnalyzeResponse)
+def analyze_markdown_asset(request: MarkdownAssetAnalyzeRequest):
+    """分析 Markdown 资源（图片/表格/公式）。"""
+    try:
+        dataset_name = request.dataset_name or request.doc_name
+        output_dir = build_output_dir(dataset_name)
+        log_path = os.path.join(output_dir, "markdown_asset_analyze.log")
+        setup_logging(log_path)
+        request_id = uuid.uuid4().hex[:8]
+
+        md_path = find_latest_markdown(request.doc_name)
+        with open(md_path, "r", encoding="utf-8") as f_md:
+            md_text = f_md.read()
+
+        alt_text, image_ref, title_text = parse_markdown_image(request.asset_markdown)
+        query = build_asset_query(alt_text, title_text, image_ref)
+
+        local_context = extract_local_context(
+            md_text,
+            request.asset_markdown,
+            image_ref,
+            request.local_context_window_chars,
+        )
+
+        image_path, image_url = resolve_asset_image(md_path, image_ref)
+        if image_path:
+            image_url = load_image_data_url(image_path)
+        if not image_url:
+            raise HTTPException(status_code=404, detail="未找到可用的图片地址")
+
+        logger.info(
+            "Asset analyze start request_id=%s doc=%s dataset=%s ref=%s query=%s",
+            request_id,
+            request.doc_name,
+            dataset_name,
+            image_ref,
+            query,
+        )
+        logger.info(
+            "Asset context lengths request_id=%s local=%d",
+            request_id,
+            len(local_context),
+        )
+
+        embedding_model_path = resolve_path(request.embedding_model, allow_missing=True)
+        embedding_model = SentenceTransformer(str(embedding_model_path), device="cpu")
+        llm_model = LLM_Model(request.llm_model)
+        config = LinearRAGConfig(
+            dataset_name=dataset_name,
+            embedding_model=embedding_model,
+            llm_model=llm_model,
+            spacy_model=request.spacy_model,
+            working_dir=str(resolve_path(request.working_dir)),
+            batch_size=request.batch_size,
+            max_workers=request.max_workers,
+            retrieval_top_k=request.retrieval_top_k,
+            max_iterations=request.max_iterations,
+            top_k_sentence=request.top_k_sentence,
+            passage_ratio=request.passage_ratio,
+            passage_node_weight=request.passage_node_weight,
+            damping=request.damping,
+            iteration_threshold=request.iteration_threshold,
+        )
+        rag = LinearRAG(global_config=config)
+        ensure_index_ready(rag)
+
+        retrieval_results = rag.retrieve([{"question": query, "answer": None}])
+        passages = (retrieval_results[0].get("sorted_passage") or [])[: request.retrieval_top_k]
+        retrieval_context, _ = truncate_passages(
+            passages,
+            max_chars=request.context_max_chars,
+            per_passage_chars=request.context_per_passage_chars,
+        )
+        logger.info(
+            "Asset retrieval context request_id=%s length=%d passages=%d",
+            request_id,
+            len(retrieval_context),
+            len(passages),
+        )
+
+        messages, prompt_meta = build_asset_messages(
+            asset_markdown=request.asset_markdown,
+            query=query,
+            local_context=local_context,
+            retrieval_context=retrieval_context,
+            image_url=image_url,
+        )
+        response = llm_model.generate(messages)
+        analysis = response.content or ""
+
+        logger.info(
+            "Asset analyze done request_id=%s output_len=%d prompt=%s@%s",
+            request_id,
+            len(analysis),
+            prompt_meta.get("prompt_id"),
+            prompt_meta.get("prompt_version"),
+        )
+        if analysis:
+            logger.info("Asset analyze output request_id=%s preview=%s", request_id, analysis[:300])
+
+        return {"analysis": analysis}
+    except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

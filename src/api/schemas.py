@@ -82,6 +82,7 @@ class MarkdownTranslateResponse(BaseModel):
     doc_name: str
     markdown_path: str
     translated_path: str
+    middle_translate_path: str
 
 
 class MarkdownTranslateWithImageRequest(BaseModel):
@@ -96,6 +97,35 @@ class MarkdownTranslateWithImageResponse(BaseModel):
     markdown_path: str
     translated_path: str
     image_count: int
+
+
+class MarkdownAssetAnalyzeRequest(BaseModel):
+    doc_name: str = Field(..., description="文档名（对应 output/mineru/<name>/ 下目录名）")
+    dataset_name: Optional[str] = Field(
+        default=None,
+        description="可选：用于检索/索引的数据集名；默认等于 doc_name（对应 dataset/<name>/）",
+    )
+    asset_markdown: str = Field(..., description="Markdown 图片语句（表格/公式以图片链接形式提供）")
+    llm_model: str = Field("qwen3-vl-flash", description="OpenAI ChatCompletions 模型名称")
+    embedding_model: str = Field("model/all-mpnet-base-v2", description="SentenceTransformer 模型名称或路径")
+    spacy_model: str = Field("en_core_web_trf", description="spaCy 模型名称")
+    working_dir: str = Field("./import", description="索引输出目录")
+    batch_size: int = Field(128, ge=1)
+    max_workers: int = Field(16, ge=1)
+    retrieval_top_k: int = Field(5, ge=1, description="检索返回的 top-k 上下文数量")
+    max_iterations: int = Field(3, ge=1)
+    top_k_sentence: int = Field(1, ge=1)
+    passage_ratio: float = Field(1.5, gt=0)
+    passage_node_weight: float = Field(0.05, gt=0)
+    damping: float = Field(0.5, gt=0, lt=1)
+    iteration_threshold: float = Field(0.5, gt=0)
+    context_max_chars: int = Field(8000, ge=1, description="检索上下文最大字符数（拼接后）")
+    context_per_passage_chars: int = Field(1500, ge=1, description="每段 passage 截断的最大字符数")
+    local_context_window_chars: int = Field(1200, ge=0, description="Markdown 本地上下文窗口字符数")
+
+
+class MarkdownAssetAnalyzeResponse(BaseModel):
+    analysis: str
 
 
 class MindmapExplainRequest(BaseModel):

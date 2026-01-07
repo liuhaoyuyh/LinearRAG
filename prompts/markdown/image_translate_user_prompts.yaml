@@ -3,10 +3,15 @@ id: image_translate.user
 version: "1.0.0"
 description: User prompt for translating OCR text into Simplified Chinese.
 template: |
-  请将以下文本翻译为简体中文：
-  - 保留英文缩写、首字母缩写与专有名词（如 AI, CPU, OpenAI）。
+  请将以下 OCR 文本翻译为【简体中文】：
+  
+  要求：
+  - 普通英文单词或短语必须翻译（例如：SUNNY DAY → 晴天）。
+  - 专业缩写、技术名词、品牌名保持英文（如 AI、CPU、OpenAI）。
   - 不修改占位符（如 <<TERM_1>>）。
-  - 只输出翻译后的文本。
-
+  - 保留原有数字、单位和标点。
+  - 只输出翻译后的文本，不要解释。
+  
   文本：
   {{ content }}
+

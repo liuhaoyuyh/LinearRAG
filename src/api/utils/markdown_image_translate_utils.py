@@ -139,13 +139,6 @@ def _load_image_translate_prompts(text: str) -> List[dict]:
     ]
 
 
-def _build_ocr_content(image_b64: str, user_text: str) -> List[dict]:
-    return [
-        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
-        {"type": "text", "text": user_text},
-    ]
-
-
 def _open_ocr_client() -> OpenAI:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -158,11 +151,12 @@ def _normalize_bbox(
     raw: List[float],
     img_width: int,
     img_height: int,
-    is_normalized: bool = True,
+    is_normalized: bool = False,
 ) -> Optional[Tuple[int, int, int, int]]:
     """将原始 bbox 坐标转换为像素坐标 [x1, y1, x2, y2]。
     
-    qwen-vl-ocr 返回的 bbox 是 0-1000 归一化坐标，格式为 [x1, y1, x2, y2]。
+    OCR 约定返回像素坐标 bbox，[x1, y1, x2, y2]。
+    当 OCR 返回 0-1000 归一化坐标时，可设置 is_normalized=True。
     
     Args:
         raw: 原始坐标 [x1, y1, x2, y2]
@@ -181,7 +175,7 @@ def _normalize_bbox(
     
     x1, y1, x2, y2 = nums
     
-    # qwen-vl-ocr 返回的是 0-1000 归一化坐标
+    # 0-1000 归一化坐标
     if is_normalized:
         scale_x = img_width / 1000.0
         scale_y = img_height / 1000.0
@@ -352,15 +346,15 @@ def _parse_ocr_response(
     payload,
     img_width: int,
     img_height: int,
-    coord_mode: str = "norm1000_swap",
+    coord_mode: str = "pixel",
 ) -> List[OCRBlock]:
     """解析 OCR 响应，支持 rotate_rect 和 bbox 两种格式。
     
     Args:
-        coord_mode: 坐标模式
-            - "norm1000_swap": 默认，适合 qwen-vl-ocr（angle=90时w和h缩放方向交换）
-            - "norm1000": 标准归一化
-            - "pixel": 像素坐标
+        coord_mode: bbox 坐标模式
+            - "pixel": 默认，按像素坐标解析 bbox
+            - "norm1000": 适合 0-1000 归一化坐标
+        rotate_rect 坐标模式固定为 "norm1000_swap"（angle=90 时 w/h 缩放方向交换）
     """
     if isinstance(payload, list):
         items = payload
@@ -375,29 +369,30 @@ def _parse_ocr_response(
             continue
         
         # 优先检测 bbox_2d 格式 [x1, y1, x2, y2]
-        # 注意：bbox_2d 坐标可能是基于模型内部处理尺寸（约1000x1000），需要缩放到原图尺寸
+        # coord_mode=pixel 时认为已是像素坐标，不做缩放
         bbox_2d = item.get("bbox_2d")
         if bbox_2d and isinstance(bbox_2d, list) and len(bbox_2d) >= 4:
             try:
                 x1, y1, x2, y2 = [float(v) for v in bbox_2d[:4]]
                 raw_bbox = tuple(int(round(v)) for v in bbox_2d[:4])
                 
-                # 检测是否需要缩放：如果坐标最大值接近 1000，可能是基于 1000x1000 的
-                max_coord = max(x1, y1, x2, y2)
-                if max_coord > 0 and max_coord <= 1100:
-                    # 假设是基于 1000x1000 的坐标，缩放到原图尺寸
-                    scale_x = img_width / 1000.0
-                    scale_y = img_height / 1000.0
-                    x1 = int(round(x1 * scale_x))
-                    y1 = int(round(y1 * scale_y))
-                    x2 = int(round(x2 * scale_x))
-                    y2 = int(round(y2 * scale_y))
-                    logger.info(
-                        "bbox_2d: raw=%s -> scaled=[%d,%d,%d,%d] (scale: %.2fx%.2f)",
-                        raw_bbox, x1, y1, x2, y2, scale_x, scale_y
-                    )
+                if coord_mode != "pixel":
+                    max_coord = max(x1, y1, x2, y2)
+                    if max_coord > 0 and max_coord <= 1100:
+                        scale_x = img_width / 1000.0
+                        scale_y = img_height / 1000.0
+                        x1 = int(round(x1 * scale_x))
+                        y1 = int(round(y1 * scale_y))
+                        x2 = int(round(x2 * scale_x))
+                        y2 = int(round(y2 * scale_y))
+                        logger.info(
+                            "bbox_2d: raw=%s -> scaled=[%d,%d,%d,%d] (scale: %.2fx%.2f)",
+                            raw_bbox, x1, y1, x2, y2, scale_x, scale_y
+                        )
+                    else:
+                        x1, y1, x2, y2 = [int(round(v)) for v in [x1, y1, x2, y2]]
+                        logger.info("bbox_2d: raw=%s -> pixels=[%d,%d,%d,%d]", raw_bbox, x1, y1, x2, y2)
                 else:
-                    # 直接使用像素坐标
                     x1, y1, x2, y2 = [int(round(v)) for v in [x1, y1, x2, y2]]
                     logger.info("bbox_2d: raw=%s -> pixels=[%d,%d,%d,%d]", raw_bbox, x1, y1, x2, y2)
                 
@@ -422,7 +417,7 @@ def _parse_ocr_response(
                 normalized = _rotate_rect_to_bbox(
                     cx, cy, w, h, angle, 
                     img_width, img_height, 
-                    coord_mode=coord_mode
+                    coord_mode="norm1000_swap"
                 )
                 logger.warning(
                     "rotate_rect: raw=[%.1f,%.1f,%.1f,%.1f,%.1f] -> bbox=%s (mode=%s)",
@@ -447,8 +442,8 @@ def _parse_ocr_response(
             raw_bbox = tuple(int(round(float(v))) for v in bbox[:4])
         except (TypeError, ValueError):
             raw_bbox = None
-        # qwen-vl-ocr 返回 0-1000 归一化坐标
-        normalized = _normalize_bbox(bbox, img_width, img_height, is_normalized=True)
+        is_normalized = coord_mode != "pixel"
+        normalized = _normalize_bbox(bbox, img_width, img_height, is_normalized=is_normalized)
         if not normalized:
             continue
         logger.info("bbox: raw=%s -> pixels=%s", raw_bbox, normalized)
@@ -465,7 +460,7 @@ def _parse_ocr_fallback(
     content: str,
     img_width: int,
     img_height: int,
-    coord_mode: str = "norm1000_swap",
+    coord_mode: str = "pixel",
 ) -> List[OCRBlock]:
     """从原始文本内容中解析 OCR 结果（JSON 解析失败时的备用方案）。"""
     blocks: List[OCRBlock] = []
@@ -492,7 +487,7 @@ def _parse_ocr_fallback(
                 normalized = _rotate_rect_to_bbox(
                     cx, cy, w, h, angle, 
                     img_width, img_height, 
-                    coord_mode=coord_mode
+                    coord_mode="norm1000_swap"
                 )
                 blocks.append(OCRBlock(
                     text=text, 
@@ -541,6 +536,13 @@ def ocr_image_blocks(image_path: Path, ocr_model: str) -> List[OCRBlock]:
     _, user_template = _load_ocr_prompts()
     buffered = image_path.read_bytes()
     image_b64 = base64.b64encode(buffered).decode("ascii")
+    suffix = image_path.suffix.lower()
+    if suffix in (".jpg", ".jpeg"):
+        mime_type = "image/jpeg"
+    elif suffix in (".png", ".bmp", ".webp"):
+        mime_type = f"image/{suffix.lstrip('.')}"
+    else:
+        mime_type = "image/png"
     
     # 获取图像尺寸，用于正确解析归一化坐标
     with Image.open(image_path) as img:
@@ -548,19 +550,83 @@ def ocr_image_blocks(image_path: Path, ocr_model: str) -> List[OCRBlock]:
     logger.info("OCR image size: %dx%d", img_width, img_height)
 
     user_text = user_template
-    messages = [
-        {"role": "user", "content": _build_ocr_content(image_b64, user_text)},
+    
+    # 构建OCR内容，格式与 1.py 保持一致
+    content = [
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime_type};base64,{image_b64}"},
+            "min_pixels": 32 * 32 * 3,
+            "max_pixels": 32 * 32 * 8192,
+        },
+        {"type": "text", "text": user_text},
     ]
+    
+    messages = [
+        {"role": "user", "content": content},
+    ]
+    
+    # 请求参数：移除 frequency_penalty（导致重复内容的主要原因）
+    request_payload = {
+        "model": ocr_model,
+        "messages": messages,
+    }
+    
+    # 保存完整的请求日志（包含图片base64）
+    log_dir = image_path.parent / "ocr_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 保存请求参数（不含图片内容，避免文件过大）
+    request_dump_path = log_dir / f"{image_path.stem}_ocr_request.json"
+    request_for_log = {
+        "model": ocr_model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime_type};base64,<BASE64_ENCODED_{len(image_b64)}_CHARS>"},
+                        "min_pixels": 32 * 32 * 3,
+                        "max_pixels": 32 * 32 * 8192,
+                    },
+                    {"type": "text", "text": user_text},
+                ],
+            },
+        ],
+        "image_size": f"{img_width}x{img_height}",
+        "image_path": str(image_path),
+    }
+    with open(request_dump_path, "w", encoding="utf-8") as f_out:
+        json.dump(request_for_log, f_out, ensure_ascii=False, indent=2)
+    logger.info("OCR request log saved: %s", str(request_dump_path))
+    
+    # 保存图片base64（单独文件）
+    base64_dump_path = log_dir / f"{image_path.stem}_ocr_image_base64.txt"
+    with open(base64_dump_path, "w", encoding="ascii") as f_out:
+        f_out.write(f"data:{mime_type};base64,{image_b64}")
+    logger.info("OCR image base64 saved: %s", str(base64_dump_path))
+    
     client = _open_ocr_client()
-    response = client.chat.completions.create(
-        model=ocr_model,
-        messages=messages,
-        temperature=0.7,
-        frequency_penalty=0.8,
-        top_p=0.8,
-        response_format={"type": "json_object"},
-    )
+    response = client.chat.completions.create(**request_payload)
+    
     content = response.choices[0].message.content or ""
+    
+    # 保存响应内容
+    response_dump_path = log_dir / f"{image_path.stem}_ocr_response.json"
+    response_for_log = {
+        "content": content,
+        "model": response.model if hasattr(response, 'model') else None,
+        "usage": {
+            "prompt_tokens": response.usage.prompt_tokens if hasattr(response, 'usage') and response.usage else None,
+            "completion_tokens": response.usage.completion_tokens if hasattr(response, 'usage') and response.usage else None,
+            "total_tokens": response.usage.total_tokens if hasattr(response, 'usage') and response.usage else None,
+        } if hasattr(response, 'usage') else None,
+    }
+    with open(response_dump_path, "w", encoding="utf-8") as f_out:
+        json.dump(response_for_log, f_out, ensure_ascii=False, indent=2)
+    logger.info("OCR response log saved: %s", str(response_dump_path))
+    
     logger.warning("OCR response content: %s", content)
     try:
         payload = json.loads(content)
@@ -790,7 +856,7 @@ def render_translated_blocks(
         img = img.convert("RGB")
         draw = ImageDraw.Draw(img)
         
-        # 创建调试图像（使用 norm1000_swap 模式，适合 qwen-vl-ocr）
+        # 创建调试图像（bbox 已按像素坐标解析）
         debug_img = img.copy()
         debug_draw = ImageDraw.Draw(debug_img)
         

@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -19,6 +20,8 @@ from src.api.schemas import (
     MarkdownTranslateResponse,
     MarkdownTranslateWithImageRequest,
     MarkdownTranslateWithImageResponse,
+    MarkdownToDocxRequest,
+    MarkdownToDocxResponse,
     MarkdownAssetAnalyzeRequest,
     MarkdownAssetAnalyzeResponse,
     MindmapExplainRequest,
@@ -52,6 +55,7 @@ from src.api.utils.markdown_translate_utils import (
     translate_text,
 )
 from src.api.utils.markdown_image_translate_utils import translate_markdown_images
+from src.api.utils.html_table_converter import preprocess_markdown_for_docx
 from src.api.utils.path_utils import (
     build_output_dir,
     find_latest_content_list,
@@ -59,6 +63,7 @@ from src.api.utils.path_utils import (
     find_latest_markdown_path,
     find_latest_middle_json,
     find_latest_translated_markdown,
+    find_latest_translated_with_image_markdown,
     resolve_path,
 )
 from src.api.utils.rag_utils import (
@@ -422,6 +427,137 @@ def translate_markdown_with_image(request: MarkdownTranslateWithImageRequest):
             raise HTTPException(status_code=404, detail="未找到翻译后的 Markdown，请先完成 Markdown 翻译。")
         raise
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/markdown/to_docx", response_model=MarkdownToDocxResponse)
+def convert_markdown_to_docx(request: MarkdownToDocxRequest):
+    """将 Markdown 文件转换为 DOCX 格式。"""
+    try:
+        # 查找 _translate_with_image.md 文件
+        md_path = find_latest_translated_with_image_markdown(request.doc_name)
+        logger.info("找到 Markdown 文件: %s", md_path)
+        
+        # 验证文件存在
+        if not md_path.exists():
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Markdown 文件不存在: {md_path}"
+            )
+        
+        # 读取原始 Markdown 内容
+        with open(md_path, "r", encoding="utf-8") as f:
+            original_md = f.read()
+        
+        logger.info("读取 Markdown 文件，大小: %d 字符", len(original_md))
+        
+        # 预处理 Markdown（转换 HTML 表格为 Markdown 表格）
+        processed_md, stats = preprocess_markdown_for_docx(original_md)
+        logger.info(
+            "预处理完成 - HTML 表格转换: %d 个，原始大小: %d，处理后大小: %d",
+            stats['html_tables_converted'],
+            stats['original_length'],
+            stats['processed_length']
+        )
+        
+        # 创建临时文件保存处理后的 Markdown
+        temp_md_path = md_path.with_name(f"{md_path.stem}_temp.md")
+        with open(temp_md_path, "w", encoding="utf-8") as f:
+            f.write(processed_md)
+        
+        logger.info("创建临时文件: %s", temp_md_path)
+        
+        # 生成输出路径（同级目录）
+        docx_path = md_path.with_suffix(".docx")
+        logger.info("目标 DOCX 路径: %s", docx_path)
+        
+        # 检查 pandoc 是否可用
+        try:
+            pandoc_version = subprocess.run(
+                ["pandoc", "--version"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            logger.info("使用 pandoc 版本: %s", pandoc_version.stdout.split('\n')[0])
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            logger.error("pandoc 不可用: %s", str(e))
+            # 清理临时文件
+            if temp_md_path.exists():
+                temp_md_path.unlink()
+            raise HTTPException(
+                status_code=500,
+                detail="pandoc 未安装或不可用，请先安装 pandoc (https://pandoc.org/installing.html)"
+            )
+        
+        # 构建 pandoc 命令
+        # 使用 --wrap=preserve 保留换行
+        # 使用 --extract-media 提取图片到指定目录
+        media_dir = md_path.parent / "media"
+        
+        pandoc_cmd = [
+            "pandoc",
+            str(temp_md_path),
+            "-o", str(docx_path),
+            "--wrap=preserve",
+            f"--extract-media={media_dir}",
+            "--from=markdown",
+            "--to=docx"
+        ]
+        
+        logger.info("执行 pandoc 命令: %s", " ".join(pandoc_cmd))
+        
+        # 执行转换
+        try:
+            result = subprocess.run(
+                pandoc_cmd,
+                capture_output=True,
+                text=True,
+                check=True,
+                cwd=str(md_path.parent)
+            )
+            
+            if result.stdout:
+                logger.info("pandoc 输出: %s", result.stdout)
+            if result.stderr:
+                logger.warning("pandoc 警告: %s", result.stderr)
+                
+        except subprocess.CalledProcessError as e:
+            logger.error("pandoc 转换失败: %s", e.stderr)
+            # 清理临时文件
+            if temp_md_path.exists():
+                temp_md_path.unlink()
+            raise HTTPException(
+                status_code=500,
+                detail=f"pandoc 转换失败: {e.stderr}"
+            )
+        finally:
+            # 清理临时文件
+            if temp_md_path.exists():
+                temp_md_path.unlink()
+                logger.info("已删除临时文件: %s", temp_md_path)
+        
+        # 验证输出文件
+        if not docx_path.exists():
+            raise HTTPException(
+                status_code=500,
+                detail="DOCX 文件生成失败"
+            )
+        
+        file_size = docx_path.stat().st_size
+        logger.info("转换成功，DOCX 文件大小: %d 字节", file_size)
+        
+        return {
+            "status": "success",
+            "doc_name": request.doc_name,
+            "markdown_path": str(md_path),
+            "docx_path": str(docx_path),
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("转换过程中发生错误: %s", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 

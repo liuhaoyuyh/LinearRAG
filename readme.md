@@ -261,3 +261,45 @@ curl -X POST http://localhost:8000/markdown/asset/analyze \
 - `context_max_chars`：拼接后的上下文最大字符数
 - `context_per_passage_chars`：每段 passage 的截断字符数
 - `local_context_window_chars`：Markdown 本地上下文窗口字符数
+
+#### Markdown 转 DOCX ✨
+
+将翻译后的 Markdown 文件（`*_translate_with_image.md`）转换为 Microsoft Word DOCX 格式。
+
+**前置要求:**
+- 安装 pandoc: `brew install pandoc` (macOS) 或 `sudo apt-get install pandoc` (Linux)
+- 已完成 `/markdown/translate` 和 `/markdown/translate_with_image` 接口调用
+
+```bash
+curl -X POST http://localhost:8000/mindmap/markdown/to_docx \
+  -H "Content-Type: application/json" \
+  -d '{
+    "doc_name": "2021年点云姿态估计"
+  }'
+```
+
+**功能特性:**
+- ✅ 自动转换行内公式 `$...$` 和段落公式 `$$...$$` 为 Word 公式对象
+- ✅ HTML 表格转换为 Word 原生表格
+- ✅ 自动提取和引用图片到 `media/` 目录
+- ✅ 保留原始换行和段落格式
+- ✅ 详细的转换日志
+
+**响应示例:**
+```json
+{
+  "status": "success",
+  "doc_name": "2021年点云姿态估计",
+  "markdown_path": "/path/to/input_translate_with_image.md",
+  "docx_path": "/path/to/input_translate_with_image.docx"
+}
+```
+
+**输出位置:**  
+DOCX 文件保存在与 Markdown 文件相同的目录：  
+`output/mineru/<doc_name>/<timestamp>/<doc_name>/<doc_name>_translate_with_image.docx`
+
+**详细文档:**  
+- 📖 [完整使用指南](docs/markdown_to_docx_usage.md)
+- 🚀 [快速入门](QUICKSTART_MARKDOWN_TO_DOCX.md)
+- 🧪 [测试脚本](scripts/test_markdown_to_docx.py)

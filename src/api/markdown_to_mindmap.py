@@ -8,6 +8,122 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
 
+def extract_heading_number(content: str) -> Optional[str]:
+    """
+    从标题内容中提取序号
+    例如：
+    - "## 3.1 点云采样模块" -> "3.1"
+    - "# 4 实验" -> "4"
+    - "### 3.1.1 细节" -> "3.1.1"
+    """
+    # 移除标题标记
+    text = content.lstrip('#').strip()
+    # 匹配开头的数字序号
+    match = re.match(r'^(\d+(?:\.\d+)*)\s+', text)
+    if match:
+        return match.group(1)
+    return None
+
+
+def count_heading_hashes(content: str) -> int:
+    """计算标题的 # 数量"""
+    count = 0
+    for char in content:
+        if char == '#':
+            count += 1
+        else:
+            break
+    return count
+
+
+def extract_block_text(block: Dict[str, Any]) -> str:
+    """
+    从块中提取文本内容（从 lines/spans 结构中）
+    """
+    lines = block.get('lines', [])
+    if not lines:
+        return ''
+    
+    text_parts = []
+    for line in lines:
+        spans = line.get('spans', [])
+        for span in spans:
+            content = span.get('content', '')
+            if content:
+                text_parts.append(content)
+    
+    return ' '.join(text_parts)
+
+
+def find_bbox_in_middle_json(
+    middle_json_path: Path,
+    heading_level: int,
+    number: str,
+    get_next: bool = False
+) -> List[float]:
+    """
+    在 middle_translate.json 中查找对应的 bbox
+    
+    Args:
+        middle_json_path: middle_translate.json 文件路径
+        heading_level: 标题级别（# 的数量）- 暂时不用于匹配
+        number: 序号（如 "3.1"）
+        get_next: 是否获取下一个块的 bbox（用于父节点匹配）
+    
+    Returns:
+        bbox 坐标 [x, y, w, h]，失败返回 [0, 0, 0, 0]
+    """
+    try:
+        with open(middle_json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        pdf_info = data.get('pdf_info', [])
+        
+        # 遍历所有页面
+        for page in pdf_info:
+            para_blocks = page.get('para_blocks', [])
+            
+            for i, block in enumerate(para_blocks):
+                # 优先查找 type 为 title 的块
+                if block.get('type') != 'title':
+                    continue
+                
+                # 尝试从 translate_content 获取内容
+                content = block.get('translate_content', '')
+                
+                # 如果 translate_content 为空，从 lines/spans 提取
+                if not content:
+                    content = extract_block_text(block)
+                
+                if not content:
+                    continue
+                
+                # 检查序号（关键：只根据序号匹配，不检查标题级别）
+                # 因为原文可能没有 # 标记
+                block_number = extract_heading_number(content)
+                if block_number != number:
+                    continue
+                
+                # 找到匹配的块
+                if get_next:
+                    # 获取下一个块的 bbox
+                    if i + 1 < len(para_blocks):
+                        next_block = para_blocks[i + 1]
+                        bbox = next_block.get('bbox', [0, 0, 0, 0])
+                        return bbox
+                else:
+                    # 获取当前块的 bbox
+                    bbox = block.get('bbox', [0, 0, 0, 0])
+                    return bbox
+        
+        # 未找到匹配
+        return [0, 0, 0, 0]
+    
+    except Exception as e:
+        print(f"查找 bbox 失败: {e}")
+        return [0, 0, 0, 0]
+
+
 class MarkdownToMindmap:
     def __init__(self):
         self.nodes = []
@@ -24,16 +140,20 @@ class MarkdownToMindmap:
         self.node_id_counter += 1
         return node_id
     
-    def create_node(self, content: str, sort_index: int = 0, child_count: int = 0) -> Dict[str, Any]:
+    def create_node(self, content: str, sort_index: int = 0, child_count: int = 0, bboxs: List[float] = None) -> Dict[str, Any]:
         """创建一个思维导图节点"""
         node_id = self.generate_node_id()
+        if bboxs is None:
+            bboxs = [0, 0, 0, 0]
+        
         node = {
             "id": node_id,
             "data": {
                 "sortIndex": sort_index,
                 "childCount": child_count,
                 "contentType": "text",
-                "markdownContent": content
+                "markdownContent": content,
+                "bboxs": bboxs
             },
             "type": "mindmap"
         }
@@ -226,7 +346,54 @@ class MarkdownToMindmap:
         
         return root
     
-    def tree_to_mindmap(self, tree: Dict[str, Any], parent_id: Optional[str] = None, sort_index: int = 0):
+    def check_node_conditions(self, content: str) -> Tuple[bool, int, Optional[str]]:
+        """
+        检查节点是否满足条件（标题 + 序号）
+        
+        Returns:
+            (是否满足条件, 标题级别, 序号)
+        """
+        first_line = content.split('\n')[0]
+        
+        # 检查是否是标题
+        if not first_line.startswith('#'):
+            return False, 0, None
+        
+        # 获取标题级别
+        level = count_heading_hashes(first_line)
+        
+        # 提取序号
+        number = extract_heading_number(first_line)
+        
+        # 必须同时有标题和序号
+        if number is not None:
+            return True, level, number
+        
+        return False, level, None
+    
+    def find_parent_with_conditions(self, tree: Dict[str, Any], node_map: Dict[str, Dict]) -> Optional[Tuple[int, str]]:
+        """
+        递归查找满足条件的父节点
+        
+        Returns:
+            (标题级别, 序号) 或 None
+        """
+        # 从 node_map 中查找父节点
+        for node_id, node_info in node_map.items():
+            children = node_info.get('children', [])
+            for child in children:
+                if child.get('id') == tree.get('id'):
+                    # 找到父节点，检查是否满足条件
+                    parent_content = node_info.get('content', '')
+                    satisfies, level, number = self.check_node_conditions(parent_content)
+                    if satisfies:
+                        return level, number
+                    # 如果父节点不满足，继续往上找
+                    return self.find_parent_with_conditions(node_info, node_map)
+        
+        return None
+    
+    def tree_to_mindmap(self, tree: Dict[str, Any], parent_id: Optional[str] = None, sort_index: int = 0, parent_tree: Dict[str, Any] = None):
         """
         将树形结构转换为 React Flow 格式的节点和边
         """
@@ -236,9 +403,42 @@ class MarkdownToMindmap:
         else:
             content = tree['content']
         
+        # 查找 bbox
+        bboxs = [0, 0, 0, 0]  # 默认值
+        
+        if hasattr(self, 'middle_json_path') and self.middle_json_path:
+            # 检查当前节点是否满足条件
+            satisfies, level, number = self.check_node_conditions(content)
+            
+            if satisfies:
+                # 自身满足条件，直接查找 bbox
+                bboxs = find_bbox_in_middle_json(
+                    self.middle_json_path,
+                    level,
+                    number,
+                    get_next=False
+                )
+            elif parent_tree is not None:
+                # 自身不满足，查找父节点
+                parent_content = parent_tree.get('original_line', '') if parent_tree.get('type') == 'heading' else parent_tree.get('content', '')
+                parent_satisfies, parent_level, parent_number = self.check_node_conditions(parent_content)
+                
+                if parent_satisfies:
+                    # 父节点满足条件，获取下一个块的 bbox
+                    bboxs = find_bbox_in_middle_json(
+                        self.middle_json_path,
+                        parent_level,
+                        parent_number,
+                        get_next=True
+                    )
+                else:
+                    # 父节点也不满足，继续往上找
+                    # 这里需要递归查找，暂时保持默认值
+                    pass
+        
         # 创建节点
         child_count = len(tree.get('children', []))
-        node = self.create_node(content, sort_index, child_count)
+        node = self.create_node(content, sort_index, child_count, bboxs)
         self.nodes.append(node)
         
         # 创建与父节点的连接
@@ -246,12 +446,12 @@ class MarkdownToMindmap:
             edge = self.create_edge(parent_id, node['id'])
             self.edges.append(edge)
         
-        # 递归处理子节点
+        # 递归处理子节点，传递当前树作为父树
         children = tree.get('children', [])
         for idx, child in enumerate(children):
-            self.tree_to_mindmap(child, node['id'], idx)
+            self.tree_to_mindmap(child, node['id'], idx, tree)
     
-    def convert(self, md_file_path: str, output_file_path: str, file_title: str) -> Dict[str, Any]:
+    def convert(self, md_file_path: str, output_file_path: str, file_title: str, middle_json_path: Optional[str] = None) -> Dict[str, Any]:
         """
         转换 markdown 文件为思维导图 JSON
         
@@ -259,10 +459,17 @@ class MarkdownToMindmap:
             md_file_path: markdown 文件路径
             output_file_path: 输出 JSON 文件路径
             file_title: 根节点标题（通常是文件名）
+            middle_json_path: middle_translate.json 文件路径（可选）
         
         Returns:
             思维导图 JSON 数据
         """
+        # 保存 middle_json_path 供后续使用
+        if middle_json_path:
+            self.middle_json_path = Path(middle_json_path)
+        else:
+            self.middle_json_path = None
+        
         # 读取 markdown 文件
         with open(md_file_path, 'r', encoding='utf-8') as f:
             md_content = f.read()
@@ -332,13 +539,31 @@ def convert_markdown_to_mindmap(file_name: str, base_dir: str = ".") -> Optional
     
     print(f"找到文件: {md_file_path}")
     
-    # 生成输出文件路径（与输入文件同级目录）
+    # 查找 middle_translate.json 文件（在同级目录）
     md_path = Path(md_file_path)
+    middle_json_path = md_path.parent / f"{file_name}_middle_translate.json"
+    
+    if not middle_json_path.exists():
+        # 尝试查找不带后缀的
+        middle_json_path = md_path.parent / "middle_translate.json"
+    
+    if middle_json_path.exists():
+        print(f"找到 middle_translate.json: {middle_json_path}")
+    else:
+        print(f"未找到 middle_translate.json，将使用默认 bbox")
+        middle_json_path = None
+    
+    # 生成输出文件路径（与输入文件同级目录）
     output_file_path = md_path.parent / f"{md_path.stem}_mindmap.json"
     
     # 转换
     converter = MarkdownToMindmap()
-    result = converter.convert(str(md_path), str(output_file_path), file_name)
+    result = converter.convert(
+        str(md_path),
+        str(output_file_path),
+        file_name,
+        str(middle_json_path) if middle_json_path else None
+    )
     
     print(f"思维导图已保存到: {output_file_path}")
     

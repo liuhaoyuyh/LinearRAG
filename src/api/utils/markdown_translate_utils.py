@@ -179,7 +179,12 @@ def translate_html_table(table_html: str, translate_fn: Callable[[str], str]) ->
             if seg.startswith("<") and seg.endswith(">"):
                 translated_segments.append(seg)
             else:
-                translated_segments.append(translate_fn(seg))
+                # 如果只是单个字母（去除空白后），直接返回不翻译
+                stripped = seg.strip()
+                if len(stripped) == 1 and stripped.isalpha():
+                    translated_segments.append(seg)
+                else:
+                    translated_segments.append(translate_fn(seg))
         return f"<{tag}{attrs}>{''.join(translated_segments)}</{tag}>"
 
     return re.sub(r"(?is)<(td|th)([^>]*)>(.*?)</\1>", _replace_cell, table_html)

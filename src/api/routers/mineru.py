@@ -49,7 +49,7 @@ def run_mineru_parse(request: MineruParseRequest):
         file_mime = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
         with open(file_path, "rb") as f:
             files = {"files": (file_path.name, f, file_mime)}
-            with httpx.Client(timeout=999.0) as client:
+            with httpx.Client(timeout=86400.0) as client:
                 resp = client.post(mineru_url, data=form_data, files=files)
 
         if resp.status_code >= 500:

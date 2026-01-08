@@ -51,18 +51,35 @@ def find_latest_markdown(doc_name: str) -> Path:
     if not timestamp_dirs:
         raise HTTPException(status_code=404, detail=f"文档 {doc_name} 下未找到时间戳目录")
     latest_dir = timestamp_dirs[-1]
+    
+    doc_name_underscore = doc_name.replace(" ", "_")
+    
+    # 1. 尝试原始 doc_name
     md_path = latest_dir / doc_name / f"{doc_name}.md"
-    if not md_path.exists():
-        same_name = list(latest_dir.rglob(f"{doc_name}.md"))
-        if same_name:
-            md_path = same_name[0]
-        else:
-            candidates = list(latest_dir.rglob("*.md"))
-            if candidates:
-                md_path = candidates[0]
-            else:
-                raise HTTPException(status_code=404, detail=f"在 {latest_dir} 下未找到 Markdown 文件")
-    return md_path
+    if md_path.exists():
+        return md_path
+    
+    # 2. 尝试下划线版本
+    md_path = latest_dir / doc_name_underscore / f"{doc_name_underscore}.md"
+    if md_path.exists():
+        return md_path
+    
+    # 3. 使用 rglob 查找原始文件名
+    same_name = list(latest_dir.rglob(f"{doc_name}.md"))
+    if same_name:
+        return same_name[0]
+    
+    # 4. 使用 rglob 查找下划线版本
+    same_name = list(latest_dir.rglob(f"{doc_name_underscore}.md"))
+    if same_name:
+        return same_name[0]
+    
+    # 5. 查找任何 .md 文件作为最后的回退
+    candidates = list(latest_dir.rglob("*.md"))
+    if candidates:
+        return candidates[0]
+    
+    raise HTTPException(status_code=404, detail=f"在 {latest_dir} 下未找到 Markdown 文件")
 
 
 def find_latest_content_list(doc_name: str) -> Path:
@@ -75,14 +92,35 @@ def find_latest_content_list(doc_name: str) -> Path:
     if not timestamp_dirs:
         raise HTTPException(status_code=404, detail=f"文档 {doc_name} 下未找到时间戳目录")
     latest_dir = timestamp_dirs[-1]
+    
+    doc_name_underscore = doc_name.replace(" ", "_")
+    
+    # 1. 尝试原始 doc_name
     content_path = latest_dir / doc_name / f"{doc_name}_content_list.json"
-    if not content_path.exists():
-        candidates = list(latest_dir.rglob(f"{doc_name}_content_list.json"))
-        if candidates:
-            content_path = candidates[0]
-        else:
-            raise HTTPException(status_code=404, detail=f"在 {latest_dir} 下未找到 {doc_name}_content_list.json")
-    return content_path
+    if content_path.exists():
+        return content_path
+    
+    # 2. 尝试下划线版本
+    content_path = latest_dir / doc_name_underscore / f"{doc_name_underscore}_content_list.json"
+    if content_path.exists():
+        return content_path
+    
+    # 3. 使用 rglob 查找原始文件名
+    candidates = list(latest_dir.rglob(f"{doc_name}_content_list.json"))
+    if candidates:
+        return candidates[0]
+    
+    # 4. 使用 rglob 查找下划线版本
+    candidates = list(latest_dir.rglob(f"{doc_name_underscore}_content_list.json"))
+    if candidates:
+        return candidates[0]
+    
+    # 5. 查找任何 *_content_list.json 文件作为最后的回退
+    candidates = list(latest_dir.rglob("*_content_list.json"))
+    if candidates:
+        return candidates[0]
+    
+    raise HTTPException(status_code=404, detail=f"在 {latest_dir} 下未找到 content_list.json 文件（尝试了 {doc_name} 和 {doc_name_underscore}）")
 
 
 def find_latest_markdown_path(doc_name: str) -> Path:
@@ -95,14 +133,30 @@ def find_latest_markdown_path(doc_name: str) -> Path:
     if not timestamp_dirs:
         raise HTTPException(status_code=404, detail=f"文档 {doc_name} 下未找到时间戳目录")
     latest_dir = timestamp_dirs[-1]
+    
+    doc_name_underscore = doc_name.replace(" ", "_")
+    
+    # 1. 尝试原始 doc_name
     md_path = latest_dir / doc_name / f"{doc_name}.md"
-    if not md_path.exists():
-        candidates = list(latest_dir.rglob(f"{doc_name}.md"))
-        if candidates:
-            md_path = candidates[0]
-        else:
-            raise HTTPException(status_code=404, detail=f"在 {latest_dir} 下未找到 {doc_name}.md")
-    return md_path
+    if md_path.exists():
+        return md_path
+    
+    # 2. 尝试下划线版本
+    md_path = latest_dir / doc_name_underscore / f"{doc_name_underscore}.md"
+    if md_path.exists():
+        return md_path
+    
+    # 3. 使用 rglob 查找原始文件名
+    candidates = list(latest_dir.rglob(f"{doc_name}.md"))
+    if candidates:
+        return candidates[0]
+    
+    # 4. 使用 rglob 查找下划线版本
+    candidates = list(latest_dir.rglob(f"{doc_name_underscore}.md"))
+    if candidates:
+        return candidates[0]
+    
+    raise HTTPException(status_code=404, detail=f"在 {latest_dir} 下未找到 {doc_name}.md 或 {doc_name_underscore}.md")
 
 
 def find_latest_middle_json(doc_name: str) -> Path:
@@ -115,14 +169,36 @@ def find_latest_middle_json(doc_name: str) -> Path:
     if not timestamp_dirs:
         raise HTTPException(status_code=404, detail=f"文档 {doc_name} 下未找到时间戳目录")
     latest_dir = timestamp_dirs[-1]
+    
+    # 尝试多种文件名变体
+    doc_name_underscore = doc_name.replace(" ", "_")
+    
+    # 1. 尝试原始 doc_name
     middle_path = latest_dir / doc_name / f"{doc_name}_middle.json"
-    if not middle_path.exists():
-        candidates = list(latest_dir.rglob(f"{doc_name}_middle.json"))
-        if candidates:
-            middle_path = candidates[0]
-        else:
-            raise HTTPException(status_code=404, detail=f"在 {latest_dir} 下未找到 {doc_name}_middle.json")
-    return middle_path
+    if middle_path.exists():
+        return middle_path
+    
+    # 2. 尝试下划线版本的 doc_name
+    middle_path = latest_dir / doc_name_underscore / f"{doc_name_underscore}_middle.json"
+    if middle_path.exists():
+        return middle_path
+    
+    # 3. 使用 rglob 查找原始文件名
+    candidates = list(latest_dir.rglob(f"{doc_name}_middle.json"))
+    if candidates:
+        return candidates[0]
+    
+    # 4. 使用 rglob 查找下划线版本
+    candidates = list(latest_dir.rglob(f"{doc_name_underscore}_middle.json"))
+    if candidates:
+        return candidates[0]
+    
+    # 5. 查找任何 *_middle.json 文件作为最后的回退
+    candidates = list(latest_dir.rglob("*_middle.json"))
+    if candidates:
+        return candidates[0]
+    
+    raise HTTPException(status_code=404, detail=f"在 {latest_dir} 下未找到 middle.json 文件（尝试了 {doc_name} 和 {doc_name_underscore}）")
 
 
 def find_latest_translated_markdown(doc_name: str) -> Path:
@@ -135,14 +211,35 @@ def find_latest_translated_markdown(doc_name: str) -> Path:
     if not timestamp_dirs:
         raise HTTPException(status_code=404, detail=f"文档 {doc_name} 下未找到时间戳目录")
     latest_dir = timestamp_dirs[-1]
+    
+    doc_name_underscore = doc_name.replace(" ", "_")
+    
+    # 1. 尝试原始 doc_name
     md_path = latest_dir / doc_name / f"{doc_name}_translate.md"
-    if not md_path.exists():
-        candidates = list(latest_dir.rglob(f"{doc_name}_translate.md"))
-        if candidates:
-            md_path = candidates[0]
-        else:
-            raise HTTPException(status_code=404, detail=f"在 {latest_dir} 下未找到 {doc_name}_translate.md")
-    return md_path
+    if md_path.exists():
+        return md_path
+    
+    # 2. 尝试下划线版本
+    md_path = latest_dir / doc_name_underscore / f"{doc_name_underscore}_translate.md"
+    if md_path.exists():
+        return md_path
+    
+    # 3. 使用 rglob 查找原始文件名
+    candidates = list(latest_dir.rglob(f"{doc_name}_translate.md"))
+    if candidates:
+        return candidates[0]
+    
+    # 4. 使用 rglob 查找下划线版本
+    candidates = list(latest_dir.rglob(f"{doc_name_underscore}_translate.md"))
+    if candidates:
+        return candidates[0]
+    
+    # 5. 查找任何 *_translate.md 文件作为最后的回退
+    candidates = list(latest_dir.rglob("*_translate.md"))
+    if candidates:
+        return candidates[0]
+    
+    raise HTTPException(status_code=404, detail=f"在 {latest_dir} 下未找到 _translate.md 文件（尝试了 {doc_name} 和 {doc_name_underscore}）")
 
 
 def find_latest_translated_with_image_markdown(doc_name: str) -> Path:
@@ -155,24 +252,80 @@ def find_latest_translated_with_image_markdown(doc_name: str) -> Path:
     if not timestamp_dirs:
         raise HTTPException(status_code=404, detail=f"文档 {doc_name} 下未找到时间戳目录")
     latest_dir = timestamp_dirs[-1]
+    
+    doc_name_underscore = doc_name.replace(" ", "_")
+    
+    # 1. 尝试原始 doc_name
     md_path = latest_dir / doc_name / f"{doc_name}_translate_with_image.md"
-    if not md_path.exists():
-        candidates = list(latest_dir.rglob(f"{doc_name}_translate_with_image.md"))
-        if candidates:
-            md_path = candidates[0]
-        else:
-            # 尝试查找任何 *_translate_with_image.md 文件
-            candidates_any = list(latest_dir.rglob("*_translate_with_image.md"))
-            if candidates_any:
-                md_path = candidates_any[0]
-            else:
-                raise HTTPException(
-                    status_code=404, 
-                    detail=f"在 {latest_dir} 下未找到 {doc_name}_translate_with_image.md"
-                )
-    return md_path
+    if md_path.exists():
+        return md_path
+    
+    # 2. 尝试下划线版本
+    md_path = latest_dir / doc_name_underscore / f"{doc_name_underscore}_translate_with_image.md"
+    if md_path.exists():
+        return md_path
+    
+    # 3. 使用 rglob 查找原始文件名
+    candidates = list(latest_dir.rglob(f"{doc_name}_translate_with_image.md"))
+    if candidates:
+        return candidates[0]
+    
+    # 4. 使用 rglob 查找下划线版本
+    candidates = list(latest_dir.rglob(f"{doc_name_underscore}_translate_with_image.md"))
+    if candidates:
+        return candidates[0]
+    
+    # 5. 查找任何 *_translate_with_image.md 文件作为最后的回退
+    candidates_any = list(latest_dir.rglob("*_translate_with_image.md"))
+    if candidates_any:
+        return candidates_any[0]
+    
+    raise HTTPException(
+        status_code=404, 
+        detail=f"在 {latest_dir} 下未找到 _translate_with_image.md 文件（尝试了 {doc_name} 和 {doc_name_underscore}）"
+    )
 
 
 def safe_filename(name: str) -> str:
     """将文件名收敛到安全的路径片段。"""
     return Path(name).name
+
+
+def find_doc_directory(doc_name: str) -> Path:
+    """
+    查找文档目录，支持文件名中的空格变换。
+    
+    Args:
+        doc_name: 文档名称
+        
+    Returns:
+        找到的文档目录路径
+        
+    Raises:
+        HTTPException: 如果找不到文档目录
+    """
+    mineru_root = BASE_DIR / "output" / "mineru"
+    
+    # 1. 尝试原始 doc_name
+    doc_dir = mineru_root / doc_name
+    if doc_dir.exists():
+        return doc_dir
+    
+    # 2. 尝试下划线版本
+    doc_name_underscore = doc_name.replace(" ", "_")
+    doc_dir = mineru_root / doc_name_underscore
+    if doc_dir.exists():
+        return doc_dir
+    
+    # 3. 查找所有匹配的目录（不区分空格/下划线）
+    doc_name_normalized = doc_name.replace(" ", "").replace("_", "")
+    for potential_dir in mineru_root.iterdir():
+        if potential_dir.is_dir():
+            potential_name_normalized = potential_dir.name.replace(" ", "").replace("_", "")
+            if potential_name_normalized == doc_name_normalized:
+                return potential_dir
+    
+    raise HTTPException(
+        status_code=404, 
+        detail=f"未在 {mineru_root} 下找到文档目录: {doc_name}"
+    )

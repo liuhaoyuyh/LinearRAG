@@ -58,6 +58,7 @@ from src.api.utils.markdown_image_translate_utils import translate_markdown_imag
 from src.api.utils.html_table_converter import preprocess_markdown_for_docx
 from src.api.utils.path_utils import (
     build_output_dir,
+    find_doc_directory,
     find_latest_content_list,
     find_latest_markdown,
     find_latest_markdown_path,
@@ -73,6 +74,7 @@ from src.api.utils.rag_utils import (
 )
 from src.model_client import create_openai_client, get_default_timeout_s
 from src.utils import LLM_Model, setup_logging
+from src.api.markdown_to_mindmap import convert_markdown_to_mindmap
 
 router = APIRouter()
 
@@ -336,43 +338,76 @@ def translate_markdown(request: MarkdownTranslateRequest):
         with open(middle_translate_path, "w", encoding="utf-8") as f_out:
             json.dump(middle_data, f_out, ensure_ascii=False, indent=2)
 
+        def _process_block_translate_content(block: dict):
+            """处理单个块的 translate_content，返回要添加到 markdown 的内容列表"""
+            results = []
+            block_type = block.get("type")
+            block_sub_type = block.get("sub_type")
+            translate_content = block.get("translate_content") or ""
+            
+            has_ref_text = any(
+                (sub_block or {}).get("type") == "ref_text"
+                for sub_block in (block.get("blocks") or [])
+            )
+            
+            # 处理顶层块的 translate_content
+            if block_type == "title":
+                if translate_content.strip():
+                    results.append(translate_content.strip())
+            elif block_type == "ref_text":
+                ref_text = _build_ref_text_content(block)
+                if ref_text.strip():
+                    results.append(ref_text.strip())
+            elif block_type == "text":
+                if translate_content.strip():
+                    results.append(translate_content.strip())
+            elif block_type == "image":
+                image_path = None
+                for span in _iter_spans(block):
+                    image_path = span.get("image_path")
+                    if image_path:
+                        break
+                if image_path:
+                    results.append(f"![](images/{image_path})")
+            elif block_type == "table":
+                if translate_content.strip():
+                    results.append(translate_content.strip())
+            elif block_type in ("equation", "interline_equation"):
+                if translate_content.strip():
+                    results.append(f"$${translate_content.strip()}$$")
+            elif block_type == "code_body":
+                # 处理代码块，特别是算法伪代码
+                if translate_content.strip():
+                    # 算法块使用代码块格式
+                    if block_sub_type == "algorithm":
+                        results.append(f"```\n{translate_content.strip()}\n```")
+                    else:
+                        # 其他代码块类型也使用代码块格式
+                        results.append(f"```\n{translate_content.strip()}\n```")
+            elif has_ref_text:
+                ref_text = _build_ref_text_content(block)
+                if ref_text.strip():
+                    results.append(ref_text.strip())
+            else:
+                # 如果顶层块没有处理，但有 translate_content，也添加
+                if translate_content.strip():
+                    results.append(translate_content.strip())
+            
+            # 处理内部的 blocks 字段（子块）
+            for sub_block in block.get("blocks") or []:
+                sub_translate_content = sub_block.get("translate_content") or ""
+                if sub_translate_content.strip():
+                    # 递归处理子块
+                    sub_results = _process_block_translate_content(sub_block)
+                    results.extend(sub_results)
+            
+            return results
+
         markdown_blocks = []
         for page in pdf_info:
             for block in page.get("para_blocks") or []:
-                block_type = block.get("type")
-                translate_content = block.get("translate_content") or ""
-                has_ref_text = any(
-                    (sub_block or {}).get("type") == "ref_text"
-                    for sub_block in (block.get("blocks") or [])
-                )
-                if block_type == "title":
-                    if translate_content.strip():
-                        markdown_blocks.append(translate_content.strip())
-                elif block_type == "ref_text":
-                    ref_text = _build_ref_text_content(block)
-                    if ref_text.strip():
-                        markdown_blocks.append(ref_text.strip())
-                elif block_type == "text":
-                    if translate_content.strip():
-                        markdown_blocks.append(translate_content.strip())
-                elif block_type == "image":
-                    image_path = None
-                    for span in _iter_spans(block):
-                        image_path = span.get("image_path")
-                        if image_path:
-                            break
-                    if image_path:
-                        markdown_blocks.append(f"![](images/{image_path})")
-                elif block_type == "table":
-                    if translate_content.strip():
-                        markdown_blocks.append(translate_content.strip())
-                elif block_type in ("equation", "interline_equation"):
-                    if translate_content.strip():
-                        markdown_blocks.append(f"$${translate_content.strip()}$$")
-                elif has_ref_text:
-                    ref_text = _build_ref_text_content(block)
-                    if ref_text.strip():
-                        markdown_blocks.append(ref_text.strip())
+                block_contents = _process_block_translate_content(block)
+                markdown_blocks.extend(block_contents)
         markdown_text = "\n\n".join(markdown_blocks)
 
         base_stem = middle_path.stem[:-7] if middle_path.stem.endswith("_middle") else middle_path.stem
@@ -1055,3 +1090,105 @@ def explain_mindmap_modules(request: MindmapExplainRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/mindmap/to_reactflow")
+def convert_mindmap_to_reactflow(request: MindmapRequest):
+    """
+    将思维导图解释的 markdown 转换为 React Flow 格式
+    
+    Args:
+        request: 包含 doc_name 的请求
+        
+    Returns:
+        React Flow 格式的思维导图数据
+    """
+    try:
+        # 使用项目根目录
+        base_dir = str(BASE_DIR)
+        
+        # 转换为思维导图
+        result = convert_markdown_to_mindmap(request.doc_name, base_dir)
+        
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"未找到文件: {request.doc_name}，请确保文件在 output/mineru 目录下"
+            )
+        
+        # 查找生成的文件路径（支持文件名中包含空格）
+        doc_dir = find_doc_directory(request.doc_name)
+        json_file = None
+        for f in doc_dir.rglob("*_mindmap_explain_mindmap.json"):
+            json_file = str(f)
+            break
+        
+        return {
+            "status": "success",
+            "doc_name": request.doc_name,
+            "message": "思维导图生成成功",
+            "file_path": json_file,
+            "node_count": len(result.get("nodes", [])),
+            "edge_count": len(result.get("edges", [])),
+            "data": result
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("生成思维导图失败: %s", str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"生成思维导图失败: {str(e)}"
+        )
+
+
+@router.get("/mindmap/reactflow/{doc_name}")
+def get_reactflow_mindmap(doc_name: str):
+    """
+    获取已生成的 React Flow 格式思维导图
+    
+    Args:
+        doc_name: 文档名称（不含扩展名）
+        
+    Returns:
+        React Flow 格式的思维导图数据
+    """
+    try:
+        # 查找文档目录（支持文件名中包含空格）
+        doc_dir = find_doc_directory(doc_name)
+        
+        # 查找 JSON 文件
+        json_file = None
+        for f in doc_dir.rglob("*_mindmap_explain_mindmap.json"):
+            json_file = f
+            break
+        
+        if json_file is None or not json_file.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"未找到思维导图文件: {doc_name}，请先生成思维导图"
+            )
+        
+        # 读取 JSON 文件
+        with open(json_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        return {
+            "status": "success",
+            "doc_name": doc_name,
+            "message": "获取思维导图成功",
+            "file_path": str(json_file),
+            "node_count": len(data.get("nodes", [])),
+            "edge_count": len(data.get("edges", [])),
+            "data": data
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("获取思维导图失败: %s", str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"获取思维导图失败: {str(e)}"
+        )

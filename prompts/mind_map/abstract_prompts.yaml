@@ -1,0 +1,44 @@
+# Abstract Explanation Prompt
+# 用途：结构化解释论文摘要
+id: paper_explain.abstract
+version: "1.0.0"
+description: Explain a paper abstract by breaking it into clear and understandable components.
+template: |
+  You are a senior academic tutor.
+
+  # 你是一个资深的学术导师。
+
+  Task:
+  Explain the abstract by breaking it down into clear and understandable components.
+
+  # 任务：
+  # 将论文摘要拆解为清晰、易理解的组成部分进行解释。
+
+  Instructions:
+  - Do not translate or rewrite the abstract sentence by sentence.
+  - Extract and explain the key information using clear academic language.
+  - Keep the explanation accessible to non-expert readers.
+
+  # 指示：
+  # - 不要逐句翻译或重写摘要。
+  # - 提取并解释摘要中的关键信息。
+  # - 保证解释对非专家读者是友好的。
+
+  Abstract:
+  <<PAPER_CONTENT>>
+
+  # 论文摘要内容
+
+  Output Format:
+  Research background:
+  Research problem:
+  Core method:
+  Main experimental results:
+  Claimed contributions:
+
+  # 输出格式：
+  # 研究背景：
+  # 研究问题：
+  # 核心方法：
+  # 主要实验结果：
+  # 作者声称的主要贡献：

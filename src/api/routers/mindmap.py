@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import time
 import uuid
@@ -403,12 +404,23 @@ def translate_markdown(request: MarkdownTranslateRequest):
             
             return results
 
+        def _remove_equation_tags(text: str) -> str:
+            """去掉公式中的 \tag{数字} 标签"""
+            # 匹配 \tag{数字} 或 \tag{数字.数字} 等格式，包括可能的空格
+            # 例如: \tag{16}, \tag{3.2}, \tag {1} 等
+            # 去掉 \tag{...} 及其前面可能的空格
+            text = re.sub(r'\s*\\tag\s*\{[^}]+\}', '', text)
+            return text
+
         markdown_blocks = []
         for page in pdf_info:
             for block in page.get("para_blocks") or []:
                 block_contents = _process_block_translate_content(block)
                 markdown_blocks.extend(block_contents)
         markdown_text = "\n\n".join(markdown_blocks)
+        
+        # 后处理：去掉公式中的标签
+        markdown_text = _remove_equation_tags(markdown_text)
 
         base_stem = middle_path.stem[:-7] if middle_path.stem.endswith("_middle") else middle_path.stem
         output_path = middle_path.with_name(f"{base_stem}_translate.md")
